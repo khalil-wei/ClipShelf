@@ -11,6 +11,7 @@ const { ignoredReason, readPacket, preparePaste } = require('./clipboard-content
 const { LoginStartup } = require('./login-startup.cjs');
 const { PasteStack } = require('./paste-stack.cjs');
 const { ShelfUpdates } = require('./shelf-updates.cjs');
+const { imageDimensions, loadImageFile, commitImageImport } = require('./image-import.cjs');
 const shelfUpdates = new ShelfUpdates();
 const stack = new PasteStack();
 const smoke = process.argv.includes('--smoke') || process.argv.includes('--paste-integration');
@@ -30,7 +31,7 @@ let stateQueue = Promise.resolve();
 function stateTask(task) { const result = stateQueue.then(task); stateQueue = result.catch(() => {}); return result; }
 let pauseTimer, pauseDeadline=0, modalBusy = false;
 const captureRetries = new Set();
-let status = { shortcut: '', native: false, events: false, dark: false, error: '', canUndo: false, startupSupported: startup.supported };
+let status = { version: app.getVersion(), shortcut: '', native: false, events: false, dark: false, error: '', canUndo: false, startupSupported: startup.supported };
 const snapshot = () => ({ ...store.snapshot(), stack: stack.pending(store.items).map(x => ({ id: x.id, title: x.title || (x.kind === 'image' ? '图片' : x.text.slice(0, 60)), kind: x.kind })), items: store.items.map(({ html, ...item }) => ({ ...item, hasFormatting: !!html })), status: { ...status, canUndo: !!undoState, dark: nativeTheme.shouldUseDarkColors } });
 function broadcast() {
   armPauseTimer();
@@ -137,6 +138,7 @@ async function poll(source = '') {
         try {
           const info=await file.stat(); if(!info.isFile()||info.size>16*1024*1024) throw Error('图片文件超过 16 MiB，未保存');
           const bytes=Buffer.alloc(info.size+1), read=await file.read(bytes,0,bytes.length,0); if(read.bytesRead!==info.size) throw Error('图片文件正在变化，请重新复制');
+          imageDimensions(bytes.subarray(0,read.bytesRead));
           image=nativeImage.createFromBuffer(bytes.subarray(0,read.bytesRead)); if(!image.isEmpty()) packet=null;
         } finally { await file.close(); }
       }
@@ -179,6 +181,19 @@ function registerShortcut(shortcut) {
   if (!globalShortcut.register(shortcut, () => showShelf(true))) throw Error(shortcut + ' 已被其他应用占用，请选择其他快捷键');
   if (status.shortcut) globalShortcut.unregister(status.shortcut);
   status.shortcut = shortcut; tray?.setToolTip('ClipShelf · ' + shortcut);
+}
+async function importImageFile(filePath) {
+  const image = await loadImageFile(filePath, { decode: bytes => nativeImage.createFromBuffer(bytes), encode: encodeImage });
+  return stateTask(async () => {
+    if (quitting) throw Error('应用正在退出');
+    try {
+      const result = await commitImageImport({ store, media, save, ...image });
+      undoState = result.undo;
+      await collectMedia();
+      const next = broadcast() || shelfUpdates.next(snapshot(), store.items);
+      return { ok: true, id: result.id, state: next };
+    } catch (error) { scheduleSave(1000); await collectMedia(); throw error; }
+  });
 }
 function installIpc() {
   ipcMain.handle('state', () => { try { store.settings.openAtLogin=startup.read(); } catch {} return shelfUpdates.full(snapshot(),store.items); });
@@ -231,6 +246,17 @@ function installIpc() {
       await collectMedia();const next=broadcast()||shelfUpdates.next(snapshot(),store.items);return {ok:true,state:next};
     } catch(e) {Object.assign(store,new ClipStore(before));return {ok:false,error:e.message};}
   }));
+  ipcMain.handle('image-import', async () => {
+    if (modalBusy) return { ok: false, error: '文件对话框已打开' };
+    if (smoke) return { ok: true, canceled: true };
+    modalBusy = true;
+    try {
+      const result = await dialog.showOpenDialog(win, { title: '导入本地图片', filters: [{ name: 'PNG / JPEG 图片', extensions: ['png', 'jpg', 'jpeg'] }], properties: ['openFile'] });
+      if (result.canceled || !result.filePaths.length) return { ok: true, canceled: true };
+      return await importImageFile(result.filePaths[0]);
+    } catch (error) { return { ok: false, error: error.message }; }
+    finally { modalBusy = false; }
+  });
   ipcMain.handle('image-export', async(_,id)=>{
     if(modalBusy) return {ok:false,error:'文件对话框已打开'};
     const item=store.items.find(x=>x.id===id&&x.kind==='image');if(!item) return {ok:false,error:'图片不存在'};
@@ -271,8 +297,18 @@ function installIpc() {
       if (target === '0') return { ok: false, error: '已复制。请从目标应用按 ' + store.settings.shortcut + ' 呼出面板，再直接粘贴。' };
       // Keep our input queue foreground until the native helper hands focus
       // back. Hiding first discards the user's activation entitlement.
-      try { await helper.request('PASTE ' + target + ' ' + win.getNativeWindowHandle().readBigUInt64LE().toString()); await hideShelf(true); return { ok: true }; }
-      catch (e) { if(quitting)return {ok:false,error:'应用正在退出'};win.show(); win.focus(); win.webContents.send('shelf-show', { preserve: true }); return { ok: false, error: '已复制；自动粘贴失败，可回原窗口按 Ctrl+V。' + e.message }; }
+      try {
+        await helper.request('PASTE ' + target + ' ' + win.getNativeWindowHandle().readBigUInt64LE().toString());
+        if (status.error.startsWith('已复制；自动粘贴失败')) status.error = '';
+        await hideShelf(true); return { ok: true };
+      }
+      catch (e) {
+        if(quitting)return {ok:false,error:'应用正在退出'};
+        status.error = '已复制；自动粘贴失败，可回原窗口按 Ctrl+V。' + e.message;
+        // If the user switched apps during the handoff, respect that focus.
+        if (!win.isFocused()) await hideShelf(true);
+        broadcast(); return { ok: false, error: status.error };
+      }
     } catch (e) { return { ok: false, error: e.message }; }
     finally { pasting = false; }
   }
@@ -329,7 +365,7 @@ else {
     nativeTheme.on('updated', broadcast);
     if (startupCheck) { await require('./startup-integration.cjs').run({ app, win }); return; }
     if (smoke) {
-      await require('./smoke.cjs').run({ app, win, store, media, save, broadcast, startNative, getHelper: () => helper, getUseRecords: () => smokeUses, snapshot, dataFile, encodeImage }); return;
+      await require('./smoke.cjs').run({ app, win, store, media, save, broadcast, startNative, getHelper: () => helper, getUseRecords: () => smokeUses, snapshot, dataFile, encodeImage, importImageFile }); return;
     }
     if (clipboardCheck) {
       await require('./clipboard-integration.cjs').run({ app, win, store, media, save, broadcast, startNative, snapshot, getHelper:()=>helper, poll }); return;

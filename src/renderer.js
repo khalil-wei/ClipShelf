@@ -241,8 +241,21 @@ function go(delta, extend = false, edge = null) { if (!visible.length) return; c
 $('#search').oninput = () => { resetScroll(); render(); };
 $('#clear-search').onclick = () => { $('#search').value = ''; resetScroll(); render(); $('#search').focus(); };
 $('#stack-add').onclick = () => stackAction('add');
+$('#import-image').onclick = async () => {
+  const button = $('#import-image'); if (button.disabled) return;
+  button.disabled = true; closeMenus();
+  try {
+    const result = await window.clips.importImage();
+    if (!result.ok) notice(result.error);
+    else if (!result.canceled) {
+      if (result.state) receive(result.state);
+      jumpHistory(result.id); notice('图片已导入，可用 Ctrl+Z 撤销');
+    }
+  } catch { notice('导入失败，请稍后重试'); }
+  finally { button.disabled = false; }
+};
 for(const action of ['next','copy','reverse','clear']) $('#stack-'+action).onclick = () => stackAction(action);
-$('#hide').onclick = () => window.clips.hide(); $('#about').onclick = () => notice('ClipShelf 0.5 · 本地剪贴板 · ' + (state.status.events ? 'Windows 事件采集' : '轮询采集'));
+$('#hide').onclick = () => window.clips.hide(); $('#about').onclick = () => notice('ClipShelf ' + (state.status.version || '') + ' · 本地剪贴板 · ' + (state.status.events ? 'Windows 事件采集' : '轮询采集'));
 $('#pause-duration').onclick = event => { const host=$('#context-menu'); host.replaceChildren(); for(const [minutes,label] of [[5,'暂停 5 分钟'],[15,'暂停 15 分钟'],[60,'暂停 1 小时'],[0,'暂停，直到手动恢复']]) { const button=node('button','',label); button.setAttribute('role','menuitem'); button.onclick=()=>{closeMenus();mutate('pause',null,minutes);}; host.append(button); } const rect=event.currentTarget.getBoundingClientRect(); host.hidden=false;host.style.left=Math.max(8,rect.right-host.offsetWidth)+'px';host.style.top=Math.min(rect.bottom+4,innerHeight-host.offsetHeight-8)+'px'; };
 $('#pause').onclick = () => mutate('pause'); $('#undo').onclick = () => mutate('undo');
 $('#add-group').onclick = () => openGroup(); $('#edit-group').onclick = () => openGroup(tab); $('#new-item').onclick = () => openPreview('new'); $('#settings').onclick = openSettings;
@@ -290,6 +303,7 @@ document.addEventListener('keydown', event => {
   if (ctrl && key === 'g' && primary) { event.preventDefault(); jumpHistory(); return; }
   if (ctrl && key === ',') { event.preventDefault(); openSettings(); return; }
   if (ctrl && key === 'n') { event.preventDefault(); event.shiftKey ? openGroup() : openPreview('new'); return; }
+  if (ctrl && key === 'o') { event.preventDefault(); $('#import-image').click(); return; }
   if (ctrl && key === 't') { event.preventDefault(); mutate('pause'); return; }
   if (ctrl && ['arrowright', 'arrowleft'].includes(key)) { event.preventDefault(); const tabs = ['all', 'star', ...state.groups.map(g => g.id)], index = tabs.indexOf(tab); switchTab(tabs[(index + (key === 'arrowright' ? 1 : tabs.length - 1)) % tabs.length]); return; }
   if (ctrl && key === 'z' && !editing) { event.preventDefault(); mutate('undo'); return; }

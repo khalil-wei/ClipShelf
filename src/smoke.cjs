@@ -4,7 +4,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const performanceNow=()=>Number(process.hrtime.bigint())/1000000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function run({ app, win, store, save, broadcast, startNative, getHelper, getUseRecords, snapshot, dataFile, media, encodeImage }) {
+async function run({ app, win, store, save, broadcast, startNative, getHelper, getUseRecords, snapshot, dataFile, media, encodeImage, importImageFile }) {
   const execute=win.webContents.executeJavaScript.bind(win.webContents);
   win.webContents.executeJavaScript=async code=>{
     const result=await execute(`(async()=>{try{return {passed:true,value:await (${code.trim().replace(/;$/,'')})};}catch(error){return {passed:false,message:error?.name+': '+error?.message,stack:error?.stack};}})()`);
@@ -190,6 +190,32 @@ async function run({ app, win, store, save, broadcast, startNative, getHelper, g
   const alphaImage=nativeImage.createFromBitmap(Buffer.from([25,50,100,128]),{width:1,height:1});
   const nativeAlpha=nativeImage.createFromBuffer(alphaImage.toPNG()).toBitmap(),alphaPacket=await encodeImage(alphaImage);
   const workerAlpha=nativeImage.createFromBuffer(alphaPacket.png).toBitmap();assert.deepEqual([...workerAlpha],[...nativeAlpha],'transparent PNG must match native encoder pixels');
+  console.log('SMOKE_STAGE image-import');
+  for (const [extension, bytes] of [['png',alphaImage.toPNG()],['jpg',alphaImage.toJPEG(90)]]) {
+    const fixture = path.join(app.getPath('userData'), '本地图片导入测试.' + extension);
+    fs.writeFileSync(fixture,bytes);
+    try {
+      const count = store.items.length, imported = await importImageFile(fixture);
+      assert.equal(imported.ok,true); assert.equal(store.items.length,count+1);
+      assert.equal(store.items[0].title,'本地图片导入测试');
+      await win.webContents.executeJavaScript(`(async()=>{
+        const search=document.querySelector('#search');search.value='本地图片导入测试';search.dispatchEvent(new Event('input'));await new Promise(r=>setTimeout(r,100));
+        const card=document.querySelector('[data-id="${imported.id}"]');if(!card)throw Error('imported image search failed');card.click();
+        document.querySelector('#cards').dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));await new Promise(r=>setTimeout(r,100));
+        await document.querySelector('#preview-image').decode();document.querySelector('#preview-dialog').close();
+        const copied=await window.clips.use(['${imported.id}'],true);if(!copied.ok)throw Error(copied.error);
+        const undo=await window.clips.mutate('undo');if(!undo.ok)throw Error(undo.error);
+        search.value='';search.dispatchEvent(new Event('input'));await new Promise(r=>setTimeout(r,100));
+      })()`);
+      assert.equal(store.items.length,count); assert.ok(!store.items.some(x=>x.id===imported.id));
+    } finally { fs.unlinkSync(fixture); }
+  }
+  await win.webContents.executeJavaScript(`(async()=>{
+    const count=(await window.clips.state()).items.length;document.querySelector('#cards').dispatchEvent(new KeyboardEvent('keydown',{key:'o',ctrlKey:true,bubbles:true}));
+    await new Promise(r=>setTimeout(r,80));if(document.querySelector('#import-image').disabled)throw Error('import button stayed disabled');
+    if((await window.clips.state()).items.length!==count)throw Error('canceling import changed history');
+  })()`);
+  imageTools.localImageImport=true;imageTools.imageImportUndo=true;imageTools.imageImportCancel=true;
   const largeBitmap=Buffer.alloc(2048*8192*4,Buffer.from([40,120,210,255]));
   const largeImage=nativeImage.createFromBitmap(largeBitmap,{width:2048,height:8192});
   let ticks=0,lastTick=performanceNow(),maxGap=0;const startWork=lastTick;

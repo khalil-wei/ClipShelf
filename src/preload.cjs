@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('clips', {
   image: (id, thumbnail = true) => ipcRenderer.invoke('image', id, thumbnail),
   rotateImage: (id, rotation) => ipcRenderer.invoke('image-rotate', id, rotation),
   exportImage: id => ipcRenderer.invoke('image-export', id),
+  importImage: () => ipcRenderer.invoke('image-import'),
   hide: () => ipcRenderer.send('hide'),
   resize: (height, finish = false) => ipcRenderer.send('resize-shelf', height, finish),
   onState: callback => ipcRenderer.on('state-changed', (_, state) => callback(state)),
