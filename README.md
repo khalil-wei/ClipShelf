@@ -110,7 +110,7 @@ Windows 11 的原生 acrylic 材质由系统支持情况决定，其他环境使
 
 ## 验证
 
-`npm test`：29 项数据和工作流测试，覆盖迁移、去重、容量、保留周期、搜索、编辑保留元数据、批量分组、撤销保留新复制内容等。
+`npm test`：41 项数据、剪贴板和工作流测试，覆盖迁移、去重、容量、图片处理、原生助手重连、分组、搜索与撤销等。
 
 `npm run verify:clipboard`：真实 Windows 剪贴板集成验证，临时写入合成位图和单张 PNG 文件。会在内存保存原剪贴板，结束时若用户未在中途复制新内容则恢复；无法保留原格式时在写入前取消。`npm run verify:startup` 用临时启动项验证注册及关闭，不开启正常自启动项。
 
@@ -118,7 +118,7 @@ Windows 11 的原生 acrylic 材质由系统支持情况决定，其他环境使
 
 普通 smoke 不执行实际粘贴；报告中 `pasteDelivered: false` 表示未验证。使用独立的 `npm run verify:paste` 验证真实插入；前台激活失败会让该命令失败，不再跳过并算作通过。
 
-截图与报告：`artifacts/shelf-v5.png`、`artifacts/shelf-v5-dark.png`、`artifacts/verification-v5.json`。便携版使用 `ClipShelf.exe --smoke`，产物放在程序旁边的 `test-artifacts`。截图全部为合成测试内容。帧间隔是这台机器上一次短测试的结果，不代表所有机器的性能保证，也不是 Paste 原版的测量值。
+`artifacts/` 中的截图和报告由本地验证生成，并已排除在 Git 外；便携版使用 `ClipShelf.exe --smoke` 时，产物放在程序旁边的 `test-artifacts`。截图全部为合成测试内容。帧间隔是这台机器上一次短测试的结果，不代表所有机器的性能保证，也不是 Paste 原版的测量值。
 
 人工验收：在记事本复制几段文字，从记事本按全局快捷键打开面板，以 Enter 和 Ctrl+数字验证粘贴回原插入点；再在浏览器、编辑器、多显示器、不同缩放和管理员权限目标中检查。对照 Mac 原版逐帧验收还需要实际客户端的录屏或运行环境。
 
