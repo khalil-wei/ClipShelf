@@ -1,4 +1,4 @@
-# ClipShelf 0.5.5 for Windows
+# ClipShelf 0.5.6 for Windows
 
 参考 Paste 的本地剪贴板工作流，使用独立代码实现 Windows 桌面应用。
 
@@ -8,11 +8,15 @@ ClipShelf 是一款本地优先的 Windows 剪贴板历史工具，采用 Electr
 
 本项目以 MIT License 发布。欢迎通过 GitHub Issues 报告问题、提出功能建议；代码改动请提交 Pull Request。提交前请运行 `npm test`。
 
-真实粘贴集成测试目前还未通过自动化桌面验收。最新验证范围见 [0.5.5 验证记录](docs/validation-v0.5.5.md)。
+真实粘贴集成测试目前还未通过自动化桌面验收。最新验证范围见 [0.5.6 验证记录](docs/validation-v0.5.6.md)。
 
 ## 启动新版
 
 Windows 便携版会发布在 GitHub Releases。保留同目录的所有文件；升级前先从旧版托盘菜单退出。新版继续使用 `%APPDATA%/ClipShelf/history.enc`，兼容上一版文本历史。
+
+## 0.5.6 文本卡片显示修复
+
+多行文本的较长首行不再被固定两行标题高度裁切，会在卡片可用区域自然换行。手动设置的名称仍限制为两行，使用省略号避免半行裁切；正文以空行开头时不再重复显示首个非空行。完整长内容可按 Space 预览。
 
 ## 0.5.5 导入失败回滚修复
 
