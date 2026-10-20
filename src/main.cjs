@@ -192,7 +192,14 @@ async function importImageFile(filePath) {
       await collectMedia();
       const next = broadcast() || shelfUpdates.next(snapshot(), store.items);
       return { ok: true, id: result.id, state: next };
-    } catch (error) { scheduleSave(1000); await collectMedia(); throw error; }
+    } catch (error) {
+      scheduleSave(1000);
+      // State reads can expose the pending import while its save is in flight.
+      // Publish the restored history before cleaning up that import's media.
+      broadcast();
+      await collectMedia();
+      throw error;
+    }
   });
 }
 function installIpc() {
