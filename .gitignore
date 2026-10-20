@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+test-artifacts/
+.smoke-data/
+artifacts/
+reference/
+paste-reference-evidence.json
+docs/paste-interaction-evidence.json
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
