@@ -121,6 +121,39 @@ async function run({ app, win, store, save, broadcast, startNative, getHelper, g
   win.hide();store.add('A'.repeat(3000)+' hidden-full-body-marker','test');const hiddenId=store.items[0].id;broadcast();win.showInactive();await sleep(120);
   await win.webContents.executeJavaScript(`(async()=>{const search=document.querySelector('#search');search.value='hidden-full-body-marker';search.dispatchEvent(new Event('input'));await new Promise(r=>requestAnimationFrame(r));if(document.querySelectorAll('.card').length!==1)throw Error('Hidden history body did not reach search');document.querySelector('#cards').dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));if(!document.querySelector('#item-text').value.endsWith('hidden-full-body-marker'))throw Error('Full preview body was truncated');document.querySelector('#preview-dialog').close();search.value='';search.dispatchEvent(new Event('input'));})()`);
   store.mutate('delete',hiddenId);broadcast();localFeatures.hiddenShelfUpdates=true;localFeatures.pauseDeadlineResume=true;
+  console.log('SMOKE_STAGE text-layout');
+  const layoutSettings = {compact:store.settings.compact,height:store.settings.height};
+  const longFirstLine = '选择您的客户并查看设置方案。REA 会添加其完整的本地配置，所有这些文字都应该显示在卡片中。';
+  store.add(longFirstLine+'\n','msedge');const layoutId=store.items[0].id;broadcast();
+  for (const compact of [true,false]) {
+    const layout = await win.webContents.executeJavaScript(`(async()=>{
+      await window.clips.mutate('settings',null,{compact:${compact}});
+      const search=document.querySelector('#search');search.value='选择您的客户';search.dispatchEvent(new Event('input'));
+      await new Promise(r=>setTimeout(r,150));
+      const card=document.querySelector('[data-id="${layoutId}"]'),title=card.querySelector('.card-title');
+      const range=document.createRange();range.selectNodeContents(title);
+      const glyphs=range.getBoundingClientRect(),box=title.getBoundingClientRect(),content=card.querySelector('.card-content').getBoundingClientRect(),rect=card.getBoundingClientRect();
+      return {glyphBottom:glyphs.bottom,titleBottom:box.bottom,contentBottom:content.bottom,rect:{x:Math.floor(rect.x)-5,y:Math.floor(rect.y)-5,width:Math.ceil(rect.width)+10,height:Math.ceil(rect.height)+10}};
+    })()`);
+    const layoutArtifacts=app.isPackaged?path.join(path.dirname(process.execPath),'test-artifacts'):path.join(__dirname,'..','artifacts');fs.mkdirSync(layoutArtifacts,{recursive:true});
+    fs.writeFileSync(path.join(layoutArtifacts,compact?'text-card-compact.png':'text-card-normal.png'),(await win.webContents.capturePage(layout.rect)).toPNG());
+    assert.ok(layout.glyphBottom<=layout.titleBottom+1,'inferred first line must not be clipped by the title box: '+JSON.stringify(layout));
+    assert.ok(layout.titleBottom<=layout.contentBottom,'fixture must fit the available card content');
+    await win.webContents.executeJavaScript(`(async()=>{
+      const raw=${JSON.stringify(longFirstLine+'\n')},id=${JSON.stringify(layoutId)},wait=()=>new Promise(r=>setTimeout(r,100));
+      await window.clips.mutate('edit',id,{title:'这是手动命名的较长标题，用于检查两行省略号。'.repeat(4),text:raw});await wait();
+      let card=document.querySelector('[data-id="'+id+'"]'),title=card.querySelector('.card-title'),style=getComputedStyle(title);
+      if(style.webkitLineClamp!=='2'||title.getBoundingClientRect().height>parseFloat(style.lineHeight)*2+1)throw Error('explicit titles must clamp to two complete lines');
+      if(card.querySelector('.card-body').textContent!==raw)throw Error('explicit title must retain the original body');
+      const leading=String.fromCharCode(10,10)+raw;await window.clips.mutate('edit',id,{title:'',text:leading});await wait();
+      card=document.querySelector('[data-id="'+id+'"]');if(card.querySelector('.card-title')||card.querySelector('.card-content').textContent!==leading)throw Error('leading blank lines must not duplicate the first nonblank line');
+      await window.clips.mutate('edit',id,{title:'',text:raw});await wait();
+    })()`);
+  }
+  store.mutate('delete',layoutId);broadcast();
+  await win.webContents.executeJavaScript(`(async()=>{await window.clips.mutate('settings',null,${JSON.stringify(layoutSettings)});const search=document.querySelector('#search');search.value='';search.dispatchEvent(new Event('input'));})()`);
+  localFeatures.unclippedTextFirstLine=true;
+  localFeatures.customTitleClamp=true;localFeatures.leadingBlankTextPreview=true;
   for (let i = 0; i < 1850; i++) store.add('历史记录测试 ' + i, 'notepad');
   broadcast(); await sleep(150);
   const performance = await win.webContents.executeJavaScript(`(async()=>{

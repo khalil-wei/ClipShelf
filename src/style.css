@@ -7,3 +7,7 @@
 #stack-bar{display:flex;align-items:center;gap:12px;margin:0 24px 6px;padding:7px 12px;border-radius:10px;background:var(--control);font-size:11px}#stack-count{white-space:nowrap;color:var(--accent)}#stack-next-title{max-width:35vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}#stack-bar button{padding:4px 8px;background:var(--hover);white-space:nowrap}.reorder-target .card-surface{outline:2px dashed var(--accent);outline-offset:3px}
 
 #image-tools{display:flex;align-items:center;gap:6px;padding:5px 0 9px;font-size:11px}#image-tools button{padding:4px 7px;background:var(--control);white-space:nowrap}#image-zoom{width:90px!important;padding:0!important}#preview-image-wrap{height:clamp(90px,calc(100vh - 250px),430px);cursor:grab;touch-action:none}#preview-image-wrap.panning{cursor:grabbing}#preview-stage{display:flex;align-items:center;justify-content:center;min-width:100%;min-height:100%;width:max-content;height:max-content}#preview-image{max-width:none;max-height:none;flex:none;user-select:none}#recording.protected{color:#bb8835}#recording.protected i{background:#bb8835}
+
+/* Copied first lines are content: only explicit user titles get a two-line clamp. */
+.card-title.card-title-auto{max-height:none;overflow:visible}
+.card-title:not(.card-title-auto){display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-height:none}

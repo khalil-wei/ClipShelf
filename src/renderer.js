@@ -123,8 +123,10 @@ function createCard(item) {
     const code = item.text.slice(0, 650), regex = /(\/\/[^\n]*|#[^\n]*$|"[^"\n]*"|'[^'\n]*'|\b(?:const|let|function|return|import|export|class|def|if|else|async|await|public|private|new|true|false|null)\b)/gm;
     let cursor = 0, match; while ((match = regex.exec(code))) { content.append(document.createTextNode(code.slice(cursor, match.index))); content.append(node('span', match[0].startsWith('//') || match[0].startsWith('#') ? 'syntax-comment' : /^["']/.test(match[0]) ? 'syntax-string' : 'syntax-keyword', match[0])); cursor = regex.lastIndex; } content.append(document.createTextNode(code.slice(cursor)));
   } else {
-    const text = item.text.slice(0, 600); const first = titleFor(item); const multiline = text.includes('\n');
-    if (item.title || multiline && text.split('\n')[0].length < 70) { content.append(node('strong', 'card-title', first), node('span', 'card-body', item.title ? text : text.slice(text.indexOf('\n') + 1).trimStart())); }
+    const text = item.text.slice(0, 600), newline = text.indexOf('\n'), firstLine = newline < 0 ? '' : text.slice(0, newline);
+    if (item.title || firstLine.trim() && firstLine.length < 70) {
+      content.append(node('strong', item.title ? 'card-title' : 'card-title card-title-auto', item.title || firstLine.trim()), node('span', 'card-body', item.title ? text : text.slice(newline + 1).trimStart()));
+    }
     else content.textContent = text;
   }
   const foot = node('div', 'card-foot'); foot.append(node('span', 'card-label', item.kind === 'image' ? `${item.width} × ${item.height}` : item.groups.length ? item.groups.map(id => state.groups.find(g => g.id === id)?.name).filter(Boolean).join(' · ') : sourceName(item.source)));
