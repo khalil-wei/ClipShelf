@@ -326,9 +326,10 @@ document.addEventListener('keydown', event => {
 document.addEventListener('keyup', event => { if (event.key === 'Control') document.documentElement.classList.remove('show-numbers'); });
 window.addEventListener('blur', () => document.documentElement.classList.remove('show-numbers'));
 window.clips.onState(receive);
-window.clips.onShow(options => { closeMenus(); if (!options?.preserve) { closeDialogs(); $('#search').value = ''; tab = 'all'; selection.clear(); primary = null; resetScroll(); } render(); if(state.status.error)notice(state.status.error); animateShelf(true); viewport.focus({ preventScroll: true }); });
+window.clips.onShow(options => { closeMenus(); if (!options?.preserve) { closeDialogs(); $('#search').value = ''; tab = 'all'; selection.clear(); primary = null; resetScroll(); } render(); if(state.status.error)notice(state.status.error); viewport.focus({ preventScroll: true }); });
+window.clips.onVisible(()=>animateShelf(true));
 window.clips.onHide(() => { closeMenus(); animateShelf(false); });
-window.clips.onSuspend(()=>{closeDialogs();cancelAnimationFrame(renderFrame);cancelAnimationFrame(wheelFrame);wheelFrame=0;animation?.cancel();});
+window.clips.onSuspend(()=>{closeDialogs();cancelAnimationFrame(renderFrame);cancelAnimationFrame(wheelFrame);wheelFrame=0;$('#shell').style.opacity='0';animation?.cancel();});
 window.clips.onNotice(notice);
 for (const e of document.querySelectorAll('[data-icon]')) e.replaceChildren(icon(e.dataset.icon, e.classList.contains('empty-icon') ? 39 : 18));
 window.clips.state().then(receive);

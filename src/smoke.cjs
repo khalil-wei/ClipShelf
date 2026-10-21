@@ -1,10 +1,10 @@
-const { BrowserWindow, globalShortcut, safeStorage, nativeImage } = require('electron');
+const { globalShortcut, safeStorage, nativeImage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const performanceNow=()=>Number(process.hrtime.bigint())/1000000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function run({ app, win, store, save, broadcast, startNative, getHelper, getUseRecords, snapshot, dataFile, media, encodeImage, importImageFile }) {
+async function run({ app, win, store, save, broadcast, startNative, getHelper, getUseRecords, snapshot, dataFile, media, encodeImage, importImageFile, showShelf, toggleShelf }) {
   const execute=win.webContents.executeJavaScript.bind(win.webContents);
   win.webContents.executeJavaScript=async code=>{
     const result=await execute(`(async()=>{try{return {passed:true,value:await (${code.trim().replace(/;$/,'')})};}catch(error){return {passed:false,message:error?.name+': '+error?.message,stack:error?.stack};}})()`);
@@ -16,31 +16,59 @@ async function run({ app, win, store, save, broadcast, startNative, getHelper, g
   const oldChild=helper.child;oldChild.kill();for(let i=0;i<100&&(!helper.alive||helper.child===oldChild);i++)await sleep(50);
   assert.ok(helper.alive&&helper.child!==oldChild,'Windows helper must reconnect after process exit');
   const bounds = await helper.request('BOUNDS ' + handle); assert.equal(bounds.split(',').length, 4);
-  const shortcutRegistered = globalShortcut.register('Ctrl+Alt+Shift+F12', () => {}); assert.ok(shortcutRegistered);
+  const shortcutRegistered = globalShortcut.register('Ctrl+Alt+Shift+F12', () => {if(process.argv.includes('--paste-integration'))void toggleShelf();}); assert.ok(shortcutRegistered);
   let pasteDelivered = false;
   if(process.argv.includes('--paste-integration')) {
   const { NativeClient } = require('./native-client.cjs');
   const sourceFixture=path.join(__dirname,'clipboard-fixture.ps1');
   const fixturePath=app.isPackaged?path.join(app.getPath('userData'),'paste-fixture.ps1'):sourceFixture;
   if(app.isPackaged)fs.writeFileSync(fixturePath,fs.readFileSync(sourceFixture));
-  const pasteFixture = new NativeClient(fixturePath);
-  const receiver = new BrowserWindow({ x:60,y:60,width: 350, height: 180, show: false, webPreferences: { sandbox: true, nodeIntegration: false } });
+  let pasteFixture;
+  const {spawnSync,spawn}=require('node:child_process');
+  const receiverSource=path.join(app.getPath('userData'),'paste-receiver.cs'),receiverExe=path.join(app.getPath('userData'),'paste-receiver.exe');
+  fs.writeFileSync(receiverSource,fs.readFileSync(path.join(__dirname,'paste-receiver.cs')));
+  const compiler=path.join(process.env.WINDIR||'C:\\Windows','Microsoft.NET','Framework64','v4.0.30319','csc.exe');
+  const compiled=spawnSync(compiler,['/nologo','/target:winexe','/platform:x64','/reference:System.Windows.Forms.dll','/reference:System.Web.Extensions.dll','/out:'+receiverExe,receiverSource],{encoding:'utf8',windowsHide:true});
+  assert.equal(compiled.status,0,compiled.error?.message||compiled.stdout+' '+compiled.stderr);
+  const receiver=new NativeClient(receiverExe,{spawnProcess:(file,args,options)=>spawn(file,args,{...options,windowsHide:false})});
+  const pasteArtifacts=app.isPackaged?path.join(path.dirname(process.execPath),'test-artifacts'):path.join(__dirname,'..','artifacts');fs.mkdirSync(pasteArtifacts,{recursive:true});
   try {
-    assert.ok(await pasteFixture.ready);await pasteFixture.request('TEXT');
-    await receiver.loadURL('data:text/html,<title>ClipShelf controlled receiver</title><textarea id="first">unchanged</textarea><textarea id="second" autofocus>before-after</textarea>');
-    win.hide();receiver.setAlwaysOnTop(true);receiver.show(); receiver.focus(); await sleep(200);
-    await receiver.webContents.executeJavaScript(`document.querySelector('#first').value='unchanged';const box=document.querySelector('#second');box.value='before-after';box.focus();box.setSelectionRange(7,7);`);
-    const captured = await helper.request('CAPTURE');
-    assert.equal(captured,receiver.getNativeWindowHandle().readBigUInt64LE().toString());
-    receiver.setAlwaysOnTop(false);
+    assert.ok(await receiver.ready);await receiver.request('RESET');win.hide();
+    const receiverHandle=await receiver.request('HANDLE');
+    console.log('PASTE_RECEIVER_READY');
+    let captured=await helper.request('CAPTURE');
+    for(let attempt=0;attempt<900&&captured!==receiverHandle;attempt++){await sleep(200);captured=await helper.request('CAPTURE');}
+    assert.equal(captured,receiverHandle,'activate the controlled receiver before testing real paste');
+    await receiver.request('RESET');
+    pasteFixture=new NativeClient(fixturePath);assert.ok(await pasteFixture.ready);await pasteFixture.request('TEXT');
+    store.add('ClipShelf paste check','controlled-fixture');
     for(let attempt=0;attempt<3;attempt++){
-      win.show();win.focus();await sleep(100);
-      await helper.request('PASTE '+captured+' '+win.getNativeWindowHandle().readBigUInt64LE().toString());win.hide();await sleep(150);
-      const values=await receiver.webContents.executeJavaScript(`[document.querySelector('#first').value,document.querySelector('#second').value]`);
+      if(process.argv.includes('--paste-interactive')){
+        console.log('PASTE_SHORTCUT_READY '+(attempt+1));
+        for(let i=0;i<1200&&(!win.isVisible()||!win.isFocused());i++)await sleep(50);
+      } else {
+        assert.equal(await receiver.request('AUTHORIZE '+process.pid),'OK');await showShelf(true);
+      }
+      for(let i=0;i<100&&(!win.isVisible()||!win.isFocused());i++)await sleep(10);
+      assert.ok(win.isVisible()&&win.isFocused(),'shelf must acquire focus before testing paste');await sleep(100);
+      assert.equal(await helper.request('CAPTURE'),win.getNativeWindowHandle().readBigUInt64LE().toString(),'shelf must hold foreground before the real double click');
+      const count=getUseRecords().length;
+      await win.webContents.executeJavaScript("document.querySelector('.card').dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true}));");
+      for(let i=0;i<120&&getUseRecords().length===count;i++)await sleep(50);
+      assert.equal(getUseRecords().length,count+1,'double click must complete the real use handler');
+      assert.deepEqual(getUseRecords()[count].result,{ok:true});
+      assert.equal(await pasteFixture.request('CHECK_TEXT'),'TEXT_MATCH');await sleep(150);
+      const values=JSON.parse(await receiver.request('VALUES'));
       assert.deepEqual(values,['unchanged','before-'+'ClipShelf paste check'.repeat(attempt+1)+'after'],'paste must insert into the original textbox at its caret');
     }
     pasteDelivered=true;
-  } finally { receiver.destroy();try{await pasteFixture.request('RESTORE');}finally{pasteFixture.close();} }
+    fs.writeFileSync(path.join(pasteArtifacts,'paste-integration.json'),JSON.stringify({passed:true,version:app.getVersion(),externalProcess:true,rendererDoubleClickHandler:true,insertions:3,pasteDelivered,backend:snapshot().status.nativeBackend,opening:process.argv.includes('--paste-interactive')?'native-test-shortcut':'cooperating-fixture-grant'},null,2));
+  } catch(error){
+    fs.writeFileSync(path.join(pasteArtifacts,'paste-integration.json'),JSON.stringify({passed:false,version:app.getVersion(),error:error.message},null,2));throw error;
+  } finally {
+    receiver.close();
+    if(pasteFixture){try{try{await pasteFixture.request('CHECK_TEXT');}catch{}console.log('PASTE_CLIPBOARD_CLEANUP '+await pasteFixture.request('RESTORE'));}finally{pasteFixture.close();}}
+  }
   console.log('PASTE_INTEGRATION_PASS');app.quit();return;
   }
   store.add('ClipShelf smoke test', 'notepad'); store.add('https://example.com', 'msedge'); await save(); broadcast(); win.showInactive(); await sleep(150);
@@ -99,8 +127,9 @@ async function run({ app, win, store, save, broadcast, startNative, getHelper, g
     target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer,clientX:target.getBoundingClientRect().left-1})); await wait();
     state=await window.clips.state(); if(state.groups[0].order[0]!==last) throw Error('pinboard item order failed');
     const sorted=state.groups[0].order; $('[data-id="'+sorted[0]+'"]').click(); $('[data-id="'+sorted[1]+'"]').dispatchEvent(new MouseEvent('click',{ctrlKey:true,bubbles:true}));
-    $('#stack-add').click(); await wait(); state=await window.clips.state();
-    if(state.stack.length!==2||state.stack[0].id!==last||$('#stack-bar').hidden) throw Error('queue UI/order failed');
+    $('#stack-add').click();
+    for(let retry=0;retry<20;retry++){await wait();state=await window.clips.state();if(state.stack.length===2&&!$('#stack-bar').hidden)break;}
+    if(state.stack.length!==2||state.stack[0].id!==last||$('#stack-bar').hidden) throw Error('queue UI/order failed: '+JSON.stringify({stack:state.stack,expected:last,hidden:$('#stack-bar').hidden}));
     $('#stack-reverse').click(); await wait(); if((await window.clips.state()).stack[0].id!==first) throw Error('queue reverse failed');
     $('#stack-copy').click(); await wait(); if((await window.clips.state()).stack.length!==1) throw Error('queue next failed');
     $('#stack-clear').click(); await wait(); if(!$('#stack-bar').hidden) throw Error('queue clear failed');
@@ -117,6 +146,15 @@ async function run({ app, win, store, save, broadcast, startNative, getHelper, g
   })()`);
   const uses = getUseRecords(); assert.ok(uses.some(x => x.copyOnly && x.ids.length === 2), 'multi-copy handler'); assert.ok(uses.some(x => !x.copyOnly && x.ids.length === 1), 'numbered quick paste handler');
   console.log('SMOKE_STAGE hidden');
+  const previousMotion=store.settings.reduceMotion;store.settings.reduceMotion=false;broadcast();await sleep(50);
+  win.hide();await sleep(50);
+  assert.equal(await win.webContents.executeJavaScript("getComputedStyle(document.querySelector('#shell')).opacity"),'0','hidden shell must not flash opaque before entrance');
+  win.showInactive();await sleep(40);
+  assert.equal(await win.webContents.executeJavaScript("(()=>{const animations=document.querySelector('#shell').getAnimations();window.__smokeEntrance=animations[0];return animations.length;})()"),1,'one entrance animation must start when the native window is shown');
+  win.webContents.send('shelf-show',{preserve:true});await sleep(30);
+  assert.equal(await win.webContents.executeJavaScript("document.querySelector('#shell').getAnimations()[0]===window.__smokeEntrance"),true,'show preparation must not restart the entrance animation');
+  await win.webContents.executeJavaScript("delete window.__smokeEntrance");
+  store.settings.reduceMotion=previousMotion;broadcast();localFeatures.singleEntranceAnimation=true;
   store.paused=true;store.pauseUntil=Date.now()+100;broadcast();await sleep(250);assert.equal(store.paused,false,'one-shot timer must resume recording');
   win.hide();store.add('A'.repeat(3000)+' hidden-full-body-marker','test');const hiddenId=store.items[0].id;broadcast();win.showInactive();await sleep(120);
   await win.webContents.executeJavaScript(`(async()=>{const search=document.querySelector('#search');search.value='hidden-full-body-marker';search.dispatchEvent(new Event('input'));await new Promise(r=>requestAnimationFrame(r));if(document.querySelectorAll('.card').length!==1)throw Error('Hidden history body did not reach search');document.querySelector('#cards').dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));if(!document.querySelector('#item-text').value.endsWith('hidden-full-body-marker'))throw Error('Full preview body was truncated');document.querySelector('#preview-dialog').close();search.value='';search.dispatchEvent(new Event('input'));})()`);
