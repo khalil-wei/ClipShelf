@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -ReferencedAssemblies System.Windows.Forms @'
@@ -10,14 +10,30 @@ using System.Windows.Forms;
 public static class ClipNative {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
-  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from,uint to,bool attach);
-  private static NativeWindow commandWindow;
-  public static void PrepareInput(){commandWindow=new NativeWindow();commandWindow.CreateHandle(new CreateParams{Parent=new IntPtr(-3)});}
+  [DllImport("user32.dll",SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr window,uint message,IntPtr wParam,IntPtr lParam,uint flags,uint timeout,out IntPtr result);
+  [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint count,INPUT[] inputs,int size);
+  [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint Type; public INPUTUNION Data; }
+  [StructLayout(LayoutKind.Explicit)] struct INPUTUNION { [FieldOffset(0)] public KEYBDINPUT Keyboard; [FieldOffset(0)] public MOUSEINPUT Mouse; }
+  [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort Key,Scan; public uint Flags,Time; public IntPtr Extra; }
+  [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int X,Y; public uint Data,Flags,Time; public IntPtr Extra; }
+  static INPUT Key(ushort key,bool up){return new INPUT{Type=1,Data=new INPUTUNION{Keyboard=new KEYBDINPUT{Key=key,Flags=up?2u:0u}}};}
+  public static void SendPaste(IntPtr target){
+    IntPtr result;
+    if(SendMessageTimeout(target,0,IntPtr.Zero,IntPtr.Zero,3,300,out result)==IntPtr.Zero)throw new Exception("目标窗口暂未响应，已取消粘贴");
+    if(GetForegroundWindow()!=target)throw new Exception("焦点已切换到其他应用，已取消粘贴");
+    var keys=new[]{Key(0x11,false),Key(0x56,false),Key(0x56,true),Key(0x11,true)};
+    var sent=SendInput(4,keys,Marshal.SizeOf(typeof(INPUT)));
+    if(sent!=4){if(sent>0)SendInput(2,new[]{Key(0x56,true),Key(0x11,true)},Marshal.SizeOf(typeof(INPUT)));throw new Exception("系统未接受粘贴按键，请确认目标应用的权限");}
+  }
+  public static void WaitForRelease(){
+    for(int attempt=0;attempt<200;attempt++){
+      bool held=false;foreach(int key in new[]{0x01,0x02,0x11,0x12,0x10,0x5B,0x5C,0x0D,0x56,0x50})if((GetAsyncKeyState(key)&0x8000)!=0)held=true;
+      if(!held)return;Thread.Sleep(10);
+    }
+    throw new Exception("请松开鼠标和修饰键后重试");
+  }
   public static void Restore(IntPtr target){
-    uint pid;uint foregroundThread=GetWindowThreadProcessId(GetForegroundWindow(),out pid),ownThread=GetCurrentThreadId();bool attached=false;
-    try{if(GetForegroundWindow()!=target){attached=foregroundThread!=0&&foregroundThread!=ownThread&&AttachThreadInput(ownThread,foregroundThread,true);SetForegroundWindow(target);}}
-    finally{if(attached)AttachThreadInput(ownThread,foregroundThread,false);}
+    if(GetForegroundWindow()!=target)SetForegroundWindow(target);
     for(int i=0;i<60&&GetForegroundWindow()!=target;i++)Thread.Sleep(5);
   }
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
@@ -53,12 +69,12 @@ public static class ClipNative {
   }
 }
 '@
-[ClipNative]::PrepareInput()
 try { [ClipNative]::Listen(); [Console]::Out.WriteLine('READY') }
 catch { [Console]::Out.WriteLine('READY_FALLBACK') }
 while ($null -ne ($line = [Console]::ReadLine())) {
   try {
     if ($line -eq 'CAPTURE') { [Console]::Out.WriteLine([ClipNative]::GetForegroundWindow().ToInt64()); continue }
+    if ($line -eq 'WAIT_KEYS') { [ClipNative]::WaitForRelease(); [Console]::Out.WriteLine('OK'); continue }
     if ($line -eq 'SOURCE') { [Console]::Out.WriteLine([ClipNative]::Source()); continue }
     if ($line -eq 'SEQUENCE') { [Console]::Out.WriteLine([ClipNative]::GetClipboardSequenceNumber()); continue }
     if ($line -eq 'FILES') { [Console]::Out.WriteLine((ConvertTo-Json -InputObject @([System.Windows.Forms.Clipboard]::GetFileDropList()) -Compress)); continue }
@@ -73,19 +89,12 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       $parts = $line.Substring(6).Split(' ')
       $target = [IntPtr]([long]$parts[0])
       if ($target -eq [IntPtr]::Zero -or -not [ClipNative]::IsWindow($target)) { throw 'Target window is no longer available' }
-      $released = $false
-      for ($i = 0; $i -lt 200; $i++) {
-        $held = $false
-        foreach ($key in @(0x01, 0x02, 0x11, 0x12, 0x10, 0x5B, 0x5C, 0x0D)) { if (([ClipNative]::GetAsyncKeyState($key) -band 0x8000) -ne 0) { $held = $true } }
-        if (-not $held) { $released = $true; break }
-        Start-Sleep -Milliseconds 10
-      }
-      if (-not $released) { throw 'Release modifier keys and try again' }
+      [ClipNative]::WaitForRelease()
       $foreground = [ClipNative]::GetForegroundWindow()
       if ($parts.Length -gt 1 -and $foreground -ne $target -and $foreground -ne [IntPtr]([long]$parts[1])) { throw 'Focus changed; paste cancelled' }
       [ClipNative]::Restore($target)
       if ([ClipNative]::GetForegroundWindow() -ne $target) { throw 'Focus changed; paste cancelled' }
-      [System.Windows.Forms.SendKeys]::SendWait('^v')
+      [ClipNative]::SendPaste($target)
       [Console]::Out.WriteLine('OK')
     }
   } catch { [Console]::Out.WriteLine('ERROR ' + $_.Exception.Message) }

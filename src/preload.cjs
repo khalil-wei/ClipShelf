@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('clips', {
   resize: (height, finish = false) => ipcRenderer.send('resize-shelf', height, finish),
   onState: callback => ipcRenderer.on('state-changed', (_, state) => callback(state)),
   onShow: callback => ipcRenderer.on('shelf-show', (_, options) => callback(options)),
+  onVisible: callback => ipcRenderer.on('shelf-visible', () => callback()),
   onHide: callback => ipcRenderer.on('shelf-hide', () => callback()),
   onSuspend: callback => ipcRenderer.on('shelf-suspend', () => callback()),
   onNotice: callback => ipcRenderer.on('notice', (_, message) => callback(message))

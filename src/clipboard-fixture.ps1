@@ -33,6 +33,10 @@ try {
         [System.Windows.Forms.Clipboard]::SetText('ClipShelf paste check')
         $ownedSequence = [FixtureSequence]::GetClipboardSequenceNumber()
         [Console]::Out.WriteLine('TEXT_READY')
+      } elseif ($line -eq 'CHECK_TEXT') {
+        if ([System.Windows.Forms.Clipboard]::GetText() -ne 'ClipShelf paste check') { throw 'Synthetic paste text no longer owns the clipboard' }
+        $ownedSequence = [FixtureSequence]::GetClipboardSequenceNumber()
+        [Console]::Out.WriteLine('TEXT_MATCH')
       } elseif ($line -eq 'IMAGE') {
         $bitmap = New-Object System.Drawing.Bitmap(96,64)
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)

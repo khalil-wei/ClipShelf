@@ -12,9 +12,14 @@ const { LoginStartup } = require('./login-startup.cjs');
 const { PasteStack } = require('./paste-stack.cjs');
 const { ShelfUpdates } = require('./shelf-updates.cjs');
 const { imageDimensions, loadImageFile, commitImageImport } = require('./image-import.cjs');
+const { WindowsInput } = require('./windows-input.cjs');
+const { ShortcutLatch } = require('./shortcut-latch.cjs');
+const windowsInput=process.platform==='win32'?new WindowsInput():null;
+const shortcutLatch=new ShortcutLatch(()=>windowsInput?.keyDown(0x56)||false);
 const shelfUpdates = new ShelfUpdates();
 const stack = new PasteStack();
-const smoke = process.argv.includes('--smoke') || process.argv.includes('--paste-integration');
+const pasteCheck = process.argv.includes('--paste-integration');
+const smoke = process.argv.includes('--smoke') || pasteCheck;
 const clipboardCheck = process.argv.includes('--clipboard-integration');
 const startupCheck = process.argv.includes('--startup-integration');
 const performanceCheck = process.argv.includes('--performance');
@@ -74,7 +79,7 @@ async function encodeImage(image, rotation = 0) {
 }
 function startNative() {
   const executable=app.isPackaged?path.join(process.resourcesPath,'ClipShelf.Native.exe'):path.join(__dirname,'..','build','ClipShelf.Native.exe');
-  const file = fs.existsSync(executable)?executable:app.isPackaged ? path.join(process.resourcesPath, 'native.ps1') : path.join(__dirname, 'native.ps1');
+  const file = !process.argv.includes('--native-powershell')&&fs.existsSync(executable)?executable:app.isPackaged ? path.join(process.resourcesPath, 'native.ps1') : path.join(__dirname, 'native.ps1');
   status.nativeBackend=file.endsWith('.exe')?'compiled':'powershell';
   helper = new NativeClient(file, {
     onChange: info => {
@@ -102,13 +107,14 @@ async function hideShelf(immediate = false) {
 }
 async function showShelf(captureTarget = true) {
   if (showing || pasting || modalBusy) return;
-  if (hideTimer && win.isVisible()) { clearTimeout(hideTimer); hideTimer = null; hideResolve?.(); hideResolve = null; hidePromise = null; win.webContents.send('shelf-show', { preserve: true }); win.focus(); return; }
+  if (hideTimer && win.isVisible()) { clearTimeout(hideTimer); hideTimer = null; hideResolve?.(); hideResolve = null; hidePromise = null; win.webContents.send('shelf-show', { preserve: true }); win.webContents.send('shelf-visible'); win.focus(); return; }
   if (win.isVisible()) { await hideShelf(); return; }
   showing = true; target = '0';
   let area;
   try {
     if (captureTarget && helper?.alive) {
-      target = await helper.request('CAPTURE');
+      target = windowsInput ? windowsInput.capture() : await helper.request('CAPTURE');
+      if(target===win.getNativeWindowHandle().readBigUInt64LE().toString())target='0';
       const [x, y, width, height] = (await helper.request('BOUNDS ' + target)).split(',').map(Number);
       if ([x, y, width, height].every(Number.isFinite) && width > 0 && height > 0) {
         const rect = screen.screenToDipRect(null, { x, y, width, height }); area = screen.getDisplayMatching(rect).workArea;
@@ -178,10 +184,11 @@ async function checkClipboardSequence() {
 }
 function registerShortcut(shortcut) {
   if (smoke || shortcut === status.shortcut) return;
-  if (!globalShortcut.register(shortcut, () => showShelf(true))) throw Error(shortcut + ' 已被其他应用占用，请选择其他快捷键');
+  if (!globalShortcut.register(shortcut, () => {void toggleShelf().catch(e=>{status.error=e.message;broadcast();});})) throw Error(shortcut + ' 已被其他应用占用，请选择其他快捷键');
   if (status.shortcut) globalShortcut.unregister(status.shortcut);
   status.shortcut = shortcut; tray?.setToolTip('ClipShelf · ' + shortcut);
 }
+function toggleShelf(){return shortcutLatch.run(()=>showShelf(true));}
 async function importImageFile(filePath) {
   const image = await loadImageFile(filePath, { decode: bytes => nativeImage.createFromBuffer(bytes), encode: encodeImage });
   return stateTask(async () => {
@@ -278,13 +285,14 @@ function installIpc() {
   });
   async function useContent(ids, copyOnly, plain = false) {
     if (pasting) return { ok: false, error: '正在粘贴，请稍候' };
+    const pasteTarget=target;
     ids = Array.isArray(ids) ? ids : [ids];
     const byId = new Map(store.items.map(x => [x.id, x]));
     const items = [...new Set(ids)].map(id => byId.get(id)).filter(Boolean);
     if (!items.length) return { ok: false, error: '内容已删除' };
     let payload;
     try { payload = preparePaste(items, store.settings, !!plain); } catch (e) { return { ok: false, error: e.message }; }
-    if (smoke) { smokeUses.push({ ids: items.map(x => x.id), ...payload, copyOnly: !!copyOnly }); return { ok: true, copied: !!copyOnly }; }
+    if (smoke && !pasteCheck) { smokeUses.push({ ids: items.map(x => x.id), ...payload, copyOnly: !!copyOnly }); return { ok: true, copied: !!copyOnly }; }
     pasting = true; captureEpoch++;
     try {
       if (payload.kind === 'image') {
@@ -301,11 +309,13 @@ function installIpc() {
       else clipboard.writeText(payload.text);
       baseline(payload.kind==='image' ? 'image:'+payload.mediaId : readPacket(clipboard,false).signature);
       if (copyOnly) return { ok: true, copied: true };
-      if (target === '0') return { ok: false, error: '已复制。请从目标应用按 ' + store.settings.shortcut + ' 呼出面板，再直接粘贴。' };
-      // Keep our input queue foreground until the native helper hands focus
-      // back. Hiding first discards the user's activation entitlement.
+      if (pasteTarget === '0') return { ok: false, error: '已复制。请从目标应用按 ' + store.settings.shortcut + ' 呼出面板，再直接粘贴。' };
+      // Grant activation from the foreground process after the initiating input
+      // is released, before the helper restores the target and sends Ctrl+V.
       try {
-        await helper.request('PASTE ' + target + ' ' + win.getNativeWindowHandle().readBigUInt64LE().toString());
+        await helper.request('WAIT_KEYS');
+        windowsInput?.authorizePaste(pasteTarget,win.getNativeWindowHandle().readBigUInt64LE().toString(),helper.child.pid);
+        await helper.request('PASTE ' + pasteTarget + ' ' + win.getNativeWindowHandle().readBigUInt64LE().toString());
         if (status.error.startsWith('已复制；自动粘贴失败')) status.error = '';
         await hideShelf(true); return { ok: true };
       }
@@ -319,7 +329,11 @@ function installIpc() {
     } catch (e) { return { ok: false, error: e.message }; }
     finally { pasting = false; }
   }
-  ipcMain.handle('use', (_, ids, copyOnly, plain) => useContent(ids, copyOnly, plain));
+  ipcMain.handle('use', async (_, ids, copyOnly, plain) => {
+    const result=await useContent(ids,copyOnly,plain);
+    if(pasteCheck)smokeUses.push({result});
+    return result;
+  });
   async function nextStack(copyOnly = false, capture = false) {
     const result = await stack.next(store.items, async id => {
       if (capture && helper?.alive) {
@@ -363,7 +377,7 @@ else {
     media = new MediaStore(path.join(app.getPath('userData'), 'media'), { encode: buffer => safeStorage.encryptString(buffer.toString('base64')), decode: buffer => Buffer.from(safeStorage.decryptString(buffer), 'base64') });
     await collectMedia(); installIpc();
     win = new BrowserWindow({ width: 1400, height: 390, frame: false, show: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, backgroundColor: '#edf0f4', backgroundMaterial: 'acrylic', roundedCorners: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
-    win.on('show',broadcast);
+    win.on('show',()=>{broadcast();win.webContents.send('shelf-visible');});
     win.on('hide',()=>win.webContents.send('shelf-suspend'));
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', e => e.preventDefault());
     win.on('close', e => { if (!quitting && !smoke) { e.preventDefault(); void hideShelf(); } });
@@ -372,7 +386,7 @@ else {
     nativeTheme.on('updated', broadcast);
     if (startupCheck) { await require('./startup-integration.cjs').run({ app, win }); return; }
     if (smoke) {
-      await require('./smoke.cjs').run({ app, win, store, media, save, broadcast, startNative, getHelper: () => helper, getUseRecords: () => smokeUses, snapshot, dataFile, encodeImage, importImageFile }); return;
+      await require('./smoke.cjs').run({ app, win, store, media, save, broadcast, startNative, getHelper: () => helper, getUseRecords: () => smokeUses, snapshot, dataFile, encodeImage, importImageFile, showShelf, toggleShelf }); return;
     }
     if (clipboardCheck) {
       await require('./clipboard-integration.cjs').run({ app, win, store, media, save, broadcast, startNative, snapshot, getHelper:()=>helper, poll }); return;
@@ -392,7 +406,7 @@ app.on('window-all-closed', () => { if (smoke) app.quit(); });
 app.on('before-quit', event => {
   if(quitting) return; quitting=true;captureEpoch++;
   clearInterval(pauseTimer);clearInterval(pollTimer);clearTimeout(saveTimer);clearTimeout(clipTimer);clearTimeout(hideTimer);for(const timer of captureRetries)clearTimeout(timer);
-  globalShortcut.unregisterAll();helper?.close();tray?.destroy();
+  globalShortcut.unregisterAll();shortcutLatch.close();helper?.close();tray?.destroy();
   if(!saver) return;event.preventDefault();
   void stateTask(async()=>{try{await save();await saver.flush();}catch(e){console.error('历史保存失败：'+e.message);dialog.showErrorBox('历史暂未保存','已保留上次成功保存的历史。'+e.message);}finally{await background.close();app.quit();}});
 });
