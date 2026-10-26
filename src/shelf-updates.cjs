@@ -3,7 +3,8 @@ const hashBody=text=>text?createHash('sha256').update(text,'utf16le').digest('he
 class ShelfUpdates {
   constructor({digest=hashBody}={}){this.revision=0;this.items=null;this.bodies=new WeakMap();this.digest=digest;}
   describe(item,source){
-    const {text='',html='',...metadata}=item;
+    const {text:preview,html:formatting,...metadata}=item;
+    const {text='',html=''}=source;
     // Memoize against live store objects, never the short-lived IPC projections.
     // Evicting an item also makes this weak entry and its body collectible.
     let body=this.bodies.get(source);

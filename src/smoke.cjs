@@ -145,6 +145,12 @@ async function run({ app, win, store, save, broadcast, startNative, getHelper, g
     return {startupSwitch:true,timedPause:true,pinboardItemOrder:true,pinboardOrder:true,pasteStack:true,jumpToHistory:true};
   })()`);
   const uses = getUseRecords(); assert.ok(uses.some(x => x.copyOnly && x.ids.length === 2), 'multi-copy handler'); assert.ok(uses.some(x => !x.copyOnly && x.ids.length === 1), 'numbered quick paste handler');
+  // A slow helper must never sit in the keyboard-to-window-show path.
+  win.hide();const originalRequest=helper.request;let boundsRequests=0;
+  helper.request=function(command){if(command.startsWith('BOUNDS ')){boundsRequests++;return new Promise(resolve=>setTimeout(()=>resolve('0,0,0,0'),600));}return originalRequest.call(this,command);};
+  try{await showShelf(true);assert.equal(boundsRequests,0,'opening the shelf must bypass the helper bounds queue');}
+  finally{helper.request=originalRequest;}
+  localFeatures.openBypassesHelper=true;
   console.log('SMOKE_STAGE hidden');
   const previousMotion=store.settings.reduceMotion;store.settings.reduceMotion=false;broadcast();await sleep(50);
   win.hide();await sleep(50);
@@ -157,8 +163,19 @@ async function run({ app, win, store, save, broadcast, startNative, getHelper, g
   store.settings.reduceMotion=previousMotion;broadcast();localFeatures.singleEntranceAnimation=true;
   store.paused=true;store.pauseUntil=Date.now()+100;broadcast();await sleep(250);assert.equal(store.paused,false,'one-shot timer must resume recording');
   win.hide();store.add('A'.repeat(3000)+' hidden-full-body-marker','test');const hiddenId=store.items[0].id;broadcast();win.showInactive();await sleep(120);
-  await win.webContents.executeJavaScript(`(async()=>{const search=document.querySelector('#search');search.value='hidden-full-body-marker';search.dispatchEvent(new Event('input'));await new Promise(r=>requestAnimationFrame(r));if(document.querySelectorAll('.card').length!==1)throw Error('Hidden history body did not reach search');document.querySelector('#cards').dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));if(!document.querySelector('#item-text').value.endsWith('hidden-full-body-marker'))throw Error('Full preview body was truncated');document.querySelector('#preview-dialog').close();search.value='';search.dispatchEvent(new Event('input'));})()`);
-  store.mutate('delete',hiddenId);broadcast();localFeatures.hiddenShelfUpdates=true;localFeatures.pauseDeadlineResume=true;
+  await win.webContents.executeJavaScript(`(async()=>{const search=document.querySelector('#search');search.value='hidden-full-body-marker';search.dispatchEvent(new Event('input'));for(let i=0;i<100&&(!document.querySelector('.card')||document.querySelector('#cards').getAttribute('aria-busy')==='true');i++)await new Promise(r=>setTimeout(r,10));if(document.querySelectorAll('.card').length!==1)throw Error('Hidden history body did not reach search');document.querySelector('#cards').dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}));for(let i=0;i<100&&document.querySelector('#preview-save').disabled;i++)await new Promise(r=>setTimeout(r,10));if(!document.querySelector('#item-text').value.endsWith('hidden-full-body-marker'))throw Error('Full preview body was truncated');const packet=await window.clips.state();const clip=packet.items.find(item=>item.id===document.querySelector('.card').dataset.id);if(clip.text.length>650||clip.textLength<=3000)throw Error('Listing retained full text body');document.querySelector('#preview-dialog').close();search.value='';search.dispatchEvent(new Event('input'));})()`);
+  await win.webContents.executeJavaScript(`(async()=>{
+    const id=${JSON.stringify(hiddenId)},wait=()=>new Promise(resolve=>setTimeout(resolve,10));
+    await wait();document.querySelector('[data-id="'+id+'"]').click();
+    document.querySelector('#cards').dispatchEvent(new KeyboardEvent('keydown',{key:'e',ctrlKey:true,bubbles:true}));
+    if(!document.querySelector('#item-text').disabled||!document.querySelector('#preview-save').disabled)throw Error('Long edit must wait for the complete body');
+    document.querySelector('#preview-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+    for(let i=0;i<100&&document.querySelector('#preview-save').disabled;i++)await wait();
+    document.querySelector('#item-text').value+=' edited-tail';document.querySelector('#preview-form').requestSubmit();
+    for(let i=0;i<100&&document.querySelector('#preview-dialog').open;i++)await wait();
+  })()`);
+  assert.equal(store.items.find(item=>item.id===hiddenId).text,'A'.repeat(3000)+' hidden-full-body-marker edited-tail');
+  store.mutate('delete',hiddenId);broadcast();localFeatures.hiddenShelfUpdates=true;localFeatures.lazyBodyEdit=true;localFeatures.pauseDeadlineResume=true;
   console.log('SMOKE_STAGE text-layout');
   const layoutSettings = {compact:store.settings.compact,height:store.settings.height};
   const longFirstLine = '选择您的客户并查看设置方案。REA 会添加其完整的本地配置，所有这些文字都应该显示在卡片中。';

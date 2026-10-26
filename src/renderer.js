@@ -19,6 +19,7 @@ const shelfReceiver=new window.ShelfReceiver({
   onState(next){state=next;if(!['all','star',...state.groups.map(g=>g.id)].includes(tab))tab='all';scheduleRender();}
 });
 function receive(next){shelfReceiver.receive(next);}
+const shelfSearch=new window.ShelfSearch({fetchMatches:query=>window.clips.search(query),onResult:scheduleRender,onError:error=>notice(error.message)});
 async function mutate(action, id, value, quiet = false) { const result = await window.clips.mutate(action, id, value); if (!result.ok) { if (!quiet) notice(result.error); } else if (result.state) receive(result.state); return result; }
 function scheduleRender() { cancelAnimationFrame(renderFrame); renderFrame = requestAnimationFrame(render); }
 function closeMenus() { $('#context-menu').hidden = true; }
@@ -58,7 +59,9 @@ function render() {
   refreshTabs();
   const sources = [...new Set(state.items.map(x => x.source).filter(Boolean))].sort(); const key = sources.join('\n');
   if (sourcesKey !== key) { const selectedSource = $('#source-filter').value; sourcesKey = key; $('#source-filter').replaceChildren(new Option('全部应用', ''), ...sources.map(s => new Option(sourceName(s), s))); if (sources.includes(selectedSource)) $('#source-filter').value = selectedSource; }
-  visible = queryItems(state.items, { tab, query: $('#search').value, kind: $('#kind-filter').value, days: Number($('#days-filter').value), source: $('#source-filter').value, order: state.groups.find(g => g.id === tab)?.order || [] });
+  const query=$('#search').value, searching=!!query.trim(), matches=shelfSearch.matches(query,state.revision);
+  visible = queryItems(searching ? matches ? state.items.filter(item=>matches.has(item.id)) : [] : state.items, { tab, kind: $('#kind-filter').value, days: Number($('#days-filter').value), source: $('#source-filter').value, order: state.groups.find(g => g.id === tab)?.order || [] });
+  viewport.setAttribute('aria-busy',String(searching&&!matches));
   const ids = new Set(visible.map(x => x.id)); selection = new Set([...selection].filter(id => ids.has(id)));
   if (!ids.has(primary)) primary = visible[0]?.id || null;
   if (!selection.size && primary) selection.add(primary);
@@ -75,8 +78,8 @@ function render() {
   const filtered = $('#search').value || $('#kind-filter').value !== 'all' || Number($('#days-filter').value) || $('#source-filter').value;
   $('#filters-toggle').classList.toggle('active', !!filtered || !$('#filters').hidden);
   $('#empty').hidden = visible.length > 0; viewport.hidden = !visible.length;
-  $('#empty h2').textContent = filtered ? '没有找到匹配的内容' : tab === 'all' ? '每一次复制，都有迹可循。' : '把常用的，留在触手可及的地方。';
-  $('#empty p').textContent = filtered ? '换个关键词，或者减少筛选条件再试试。' : tab === 'all' ? '复制文字、截图或图片，下一次灵感就在这里。' : '将卡片拖到这个分组，或右键选择加入分组。';
+  $('#empty h2').textContent = searching&&!matches ? '正在搜索…' : filtered ? '没有找到匹配的内容' : tab === 'all' ? '每一次复制，都有迹可循。' : '把常用的，留在触手可及的地方。';
+  $('#empty p').textContent = searching&&!matches ? '' : filtered ? '换个关键词，或者减少筛选条件再试试。' : tab === 'all' ? '复制文字、截图或图片，下一次灵感就在这里。' : '将卡片拖到这个分组，或右键选择加入分组。';
   if (state.status.error && state.status.error !== previousError) notice(state.status.error); previousError = state.status.error;
   const queue = state.stack || []; $('#stack-bar').hidden = !queue.length; $('#stack-count').textContent = '顺序粘贴 · ' + queue.length + ' 项'; $('#stack-next-title').textContent = queue[0]?.title || ''; $('#stack-next').title = state.status.stackShortcut ? 'Ctrl+Alt+P：在目标窗口粘贴下一项' : '快捷键未注册，可从面板操作';
   renderWindow();
@@ -90,7 +93,7 @@ function renderWindow() {
   const keep = new Set();
   for (const index of indices) {
     const item = visible[index]; if (!item) continue; keep.add(item.id);
-    const fingerprint = JSON.stringify([item.text.slice(0, 650), item.text.length, item.title, item.kind, item.mediaId, item.hasFormatting, item.starred, item.groups, item.source, item.updated]);
+    const fingerprint = JSON.stringify([item.text, item.textLength, item.title, item.kind, item.mediaId, item.hasFormatting, item.starred, item.groups, item.source, item.updated]);
     let card = cards.get(item.id);
     if (!card || card.dataset.fingerprint !== fingerprint) {
       const old = card; card = createCard(item); card.dataset.fingerprint = fingerprint; cards.set(item.id, card);
@@ -172,9 +175,22 @@ function openPreview(mode = 'view', id = primary) {
   const readOnly = mode === 'view'; $('#item-text').readOnly = $('#item-title').readOnly = readOnly;
   $('#item-text').hidden = item?.kind === 'image'; $('#preview-image-wrap').hidden = item?.kind !== 'image';
   const request=++previewRequest;$('#image-tools').hidden=item?.kind!=='image';$('#preview-image').removeAttribute('src');
+  const needsBody=item&&item.kind!=='image'&&item.textLength>item.text.length;
+  $('#preview-save').disabled=$('#preview-edit').disabled=!!needsBody;
+  $('#item-text').disabled=!!needsBody;
+  if(needsBody){
+    $('#item-text').value='';$('#preview-error').textContent='正在读取正文…';
+    window.clips.text(id).then(result=>{
+      if(request!==previewRequest||previewId!==id)return;
+      if(!result.ok){$('#preview-error').textContent=result.error;return;}
+      $('#item-text').value=result.text;$('#preview-error').textContent='';
+      $('#item-text').disabled=false;
+      $('#preview-save').disabled=$('#preview-edit').disabled=false;
+    }).catch(error=>{if(request===previewRequest)$('#preview-error').textContent=error.message;});
+  }
   if (item?.kind === 'image') { const requestId = id; $('#preview-image').alt = titleFor(item); window.clips.image(id, false).then(result => { if (previewId !== requestId || request!==previewRequest) return; if (result.ok) { $('#preview-image').onload=fitImage;$('#preview-image').src = result.dataUrl; } else $('#preview-error').textContent = result.error; }); }
   $('#preview-save').hidden = readOnly; $('#preview-edit').hidden = !readOnly; $('#preview-copy').hidden = $('#preview-paste').hidden = !readOnly;
-  $('#preview-meta').textContent = item ? `${sourceName(item.source)} · ${relativeTime(item.updated)} · ` + (item.kind === 'image' ? `${item.width} × ${item.height} · ${Math.ceil(item.bytes / 1024)} KiB` : `${item.text.length.toLocaleString()} 字符` + (item.hasFormatting ? ' · 保留原始格式' : '')) : '保存后会出现在剪贴板历史中';
+  $('#preview-meta').textContent = item ? `${sourceName(item.source)} · ${relativeTime(item.updated)} · ` + (item.kind === 'image' ? `${item.width} × ${item.height} · ${Math.ceil(item.bytes / 1024)} KiB` : `${(item.textLength??item.text.length).toLocaleString()} 字符` + (item.hasFormatting ? ' · 保留原始格式' : '')) : '保存后会出现在剪贴板历史中';
   if (!$('#preview-dialog').open) $('#preview-dialog').showModal();
   if (mode === 'rename' || mode === 'new' || item?.kind === 'image') $('#item-title').focus(); else $('#item-text').focus();
 }
@@ -270,7 +286,7 @@ $('#remove-group').onclick = () => confirmAction('删除这个分组？', '分�
 $('#group-form').onsubmit = async event => { event.preventDefault(); const r = await mutate(groupEdit ? 'group-edit' : 'group-add', groupEdit, { name: $('#group-name').value, color: groupColor }); if (r.ok) $('#group-dialog').close(); };
 $('#preview-edit').onclick = () => openPreview('edit', previewId);
 $('#preview-copy').onclick = () => use([previewId], true); $('#preview-paste').onclick = () => use([previewId]);
-$('#preview-form').onsubmit = async event => { event.preventDefault(); const result = await mutate(previewId ? 'edit' : 'create', previewId, { text: $('#item-text').value, title: $('#item-title').value }, true); if (result.ok) { $('#preview-dialog').close(); notice('已保存'); } else $('#preview-error').textContent = result.error; };
+$('#preview-form').onsubmit = async event => { event.preventDefault(); if($('#preview-save').disabled)return; const result = await mutate(previewId ? 'edit' : 'create', previewId, { text: $('#item-text').value, title: $('#item-title').value }, true); if (result.ok) { $('#preview-dialog').close(); notice('已保存'); } else $('#preview-error').textContent = result.error; };
 $('#settings-form').onsubmit = async event => { event.preventDefault(); const result = await mutate('settings', null, { openAtLogin: $('#setting-startup').checked, theme: $('#setting-theme').value, shortcut: $('#setting-shortcut').value, retentionDays: Number($('#setting-retention').value), separator: ({ line: '\n', paragraph: '\n\n', space: ' ', tab: '\t' })[$('#setting-separator').value], hideOnBlur: $('#setting-blur').checked, reduceMotion: $('#setting-motion').checked, compact: $('#setting-compact').checked, captureImages: $('#setting-images').checked, alwaysPlainText: $('#setting-plain').checked, ignoreConfidential: $('#setting-confidential').checked, ignoredApps: $('#setting-ignored-apps').value.split('\n').map(x => x.trim()).filter(Boolean) }, true); if (result.ok) $('#settings-dialog').close(); else $('#settings-error').textContent = result.error; };
 for (const b of document.querySelectorAll('.close-dialog')) b.onclick = () => b.closest('dialog').close();
 for (const dialog of document.querySelectorAll('dialog')) { dialog.addEventListener('click', event => { if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close(); } }); dialog.addEventListener('close', () => viewport.focus({ preventScroll: true })); }

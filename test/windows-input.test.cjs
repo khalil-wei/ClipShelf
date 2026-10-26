@@ -2,6 +2,11 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {WindowsInput}=require('../src/windows-input.cjs');
 const {ShortcutLatch}=require('../src/shortcut-latch.cjs');
+test('window bounds are read directly without waiting for the native request queue',()=>{
+  const input=new WindowsInput({windowRect:(target,rect)=>{assert.equal(target,42);Object.assign(rect,{left:-100,top:20,right:700,bottom:620});return true;}});
+  assert.deepEqual(input.bounds('42'),{x:-100,y:20,width:800,height:600});
+  assert.equal(new WindowsInput({windowRect:()=>false}).bounds('42'),null);
+});
 test('foreground rights are granted only by the active shelf to its own helper',()=>{
   let foreground=10;const grants=[];
   const input=new WindowsInput({foreground:()=>foreground,allowForeground:pid=>{grants.push(pid);return 1;},keyState:()=>0});
