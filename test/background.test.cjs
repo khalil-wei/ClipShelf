@@ -66,3 +66,12 @@ test('background worker restarts after unexpected termination',async()=>{
     assert.equal(await worker.run('serialize',{after:true}),'{"after":true}');
   } finally {await worker.close();}
 });
+test('large history serialization uses the shorter idle lifetime without losing work',async()=>{
+  const worker=new Background({idleMs:5000,imageIdleMs:20});
+  try{
+    const text='x'.repeat(4*1024*1024);
+    assert.equal(JSON.parse(await worker.run('serialize',{items:[{text}]})).items[0].text.length,text.length);
+    await new Promise(resolve=>setTimeout(resolve,150));assert.equal(worker.worker,null);
+    assert.equal(await worker.run('serialize',{ready:true}),'{"ready":true}');
+  }finally{await worker.close();}
+});

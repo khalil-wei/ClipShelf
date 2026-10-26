@@ -1,6 +1,6 @@
 {
   "name": "clipshelf",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": true,
   "description": "Local-first Windows clipboard shelf",
   "repository": {
@@ -13,7 +13,8 @@
     "test": "node --test test/*.test.cjs",
     "smoke": "electron . --smoke",
     "build:native": "node scripts/build-native.cjs",
-    "pack": "npm run build:native && electron-packager . ClipShelf --platform=win32 --arch=x64 --out=dist/v0.5.7 --overwrite --extra-resource=build/ClipShelf.Native.exe --extra-resource=src/native.ps1 --ignore=^/build --ignore=^/scripts --ignore=^/dist --ignore=^/reference --ignore=^/test --ignore=^/docs --ignore=^/artifacts --ignore=^/.smoke-data --ignore=paste-reference-evidence.json",
+    "build:icons": "node scripts/build-icons.cjs",
+    "pack": "node scripts/pack.cjs",
     "perf": "electron . --performance",
     "verify:clipboard": "electron . --clipboard-integration",
     "verify:startup": "electron . --startup-integration",

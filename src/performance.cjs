@@ -22,11 +22,24 @@ async function run({app,win,store,save,broadcast,startNative,getHelper,encodeIma
     if(!await startNative())throw Error('Windows helper did not start');
     store.configure({hideOnBlur:false});
     for(let i=0;i<1850;i++)store.add(`fixture-${i} `+'A local clipboard sample. '.repeat(16),'notepad');
-    for(let i=0;i<16;i++)store.add(`long-${i} `+'中文剪贴板'.repeat(17476),'msedge');
-    await save();broadcast();win.showInactive();await sleep(1000);win.hide();await sleep(2000);
+    const largeHistory=process.argv.includes('--perf-large-history');
+    for(let i=0;i<(largeHistory?60:16);i++)store.add(`long-${i} `+'中文剪贴板'.repeat(largeHistory?55000:17476),'msedge');
+    await save();broadcast();win.showInactive();await sleep(1000);
+    const listing=await win.webContents.executeJavaScript('window.clips.state().then(state=>({items:state.items.length,textChars:state.items.reduce((sum,item)=>sum+item.text.length,0)}))');
+    win.hide();await sleep(2000);
     await measure('hiddenIdle',()=>sleep(8000));
     await measure('hiddenCopies',async()=>{for(let i=0;i<36;i++){store.add(`burst-${i} `+'sample '.repeat(80),'notepad');broadcast();await sleep(100);}await save();await sleep(750);return{copies:36};});
-    await measure('openShelf',async()=>{await showShelf(false);return await win.webContents.executeJavaScript(`new Promise((resolve,reject)=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const card=document.querySelector('.card.selected');if(!card?.textContent.includes('burst-35'))return reject(Error('Hidden shelf did not receive the latest history'));resolve({cards:document.querySelectorAll('.card').length,latestHistory:true});})))`);});
+    await measure('openShelf',async()=>{await showShelf(false);return await win.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const deadline=performance.now()+10000;function check(){const ready=[...document.querySelectorAll('.card')].some(card=>card.textContent.includes('burst-35'));if(ready)return requestAnimationFrame(()=>requestAnimationFrame(()=>resolve({cards:document.querySelectorAll('.card').length,latestHistory:true})));if(performance.now()>deadline)return reject(Error('Hidden shelf did not receive the latest history'));setTimeout(check,10);}check();})`);});
+    await measure('repeatedOpen',async()=>{
+      const times=[];
+      for(let i=0;i<8;i++){
+        await hideShelf(true);await sleep(150);
+        const start=now();await showShelf(true);
+        await win.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+        times.push(round(now()-start));
+      }
+      return {openMs:times};
+    });
     await measure('visibleIdle',()=>sleep(8000));
     await measure('scroll',()=>win.webContents.executeJavaScript(`new Promise(resolve=>{const host=document.querySelector('#cards'),frames=[];let n=0,last=performance.now();function step(t){frames.push(t-last);last=t;host.scrollLeft+=100;if(++n<80)requestAnimationFrame(step);else{frames.sort((a,b)=>a-b);resolve({frames:frames.length,p95FrameMs:frames[Math.floor(frames.length*.95)],cards:document.querySelectorAll('.card').length});}}requestAnimationFrame(step);})`));
     await hideShelf(true);
@@ -47,6 +60,8 @@ async function run({app,win,store,save,broadcast,startNative,getHelper,encodeIma
       stages[name]={...work[name],samples:rows.length,cpuMs:round(cpuMs),cpuOneCorePercent:round(cpuMs/elapsedMs*100),cpuMachinePercent:round(cpuMs/elapsedMs*100/logicalCpus),workingMiBLast:round(totals.at(-1)?.working||0),workingMiBPeak:round(Math.max(...totals.map(x=>x.working))),privateMiBLast:round(totals.at(-1)?.private||0),privateMiBPeak:round(Math.max(...totals.map(x=>x.private)))};
     }
     const result={label,version:app.getVersion(),date:new Date().toISOString(),nativeHelper:path.basename(getHelper().file),logicalCpus,cpu:os.cpus()[0].model,notes:['Windows Get-Process: sum of Electron processes and native helper; measurement PowerShell excluded.','Working set totals include shared pages; private bytes are committed private memory, not exclusive resident RAM.','250 ms sampling; synthetic 1902-item history with about 4 MiB UTF-8 long text; no user clipboard contents/history access.','CPU machine percent divides measured CPU time by wall time and logical processor count; no forced GC.'],stages,samples};
+    result.listing=listing;result.historyTextMiB=round(store.items.reduce((sum,item)=>sum+Buffer.byteLength(item.text),0)/1048576);
+    result.notes[2]=`${largeHistory?'Large':'Standard'} synthetic history; listing body size measured over IPC. No user clipboard contents/history access.`;
     const out=path.join(app.isPackaged?path.dirname(process.execPath):app.getAppPath(),'test-artifacts');await fs.mkdir(out,{recursive:true});
     const file=path.join(out,`performance-${label}.json`);await fs.writeFile(file,JSON.stringify(result,null,2));console.log(JSON.stringify({file,...result,samples:undefined},null,2));app.quit();
   }catch(e){clearInterval(timer);sampler.kill();console.error(e);app.exit(1);}

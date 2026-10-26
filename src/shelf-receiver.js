@@ -1,4 +1,19 @@
 (function(root){
+  class ShelfSearch {
+    constructor({fetchMatches,onResult,onError=()=>{}}){Object.assign(this,{fetchMatches,onResult,onError});this.key=null;this.ids=null;this.token=0;}
+    matches(query,revision){
+      if(!query.trim()){this.key=null;this.ids=null;this.token++;return null;}
+      const key=JSON.stringify([query,revision]);
+      if(this.key!==key){
+        this.key=key;this.ids=null;const token=++this.token;
+        Promise.resolve().then(()=>this.fetchMatches(query)).then(result=>{
+          if(token!==this.token)return;
+          this.ids=new Set(result.ids);this.onResult();
+        }).catch(error=>{if(token!==this.token)return;this.ids=new Set();this.onError(error);this.onResult();});
+      }
+      return this.ids;
+    }
+  }
   class ShelfReceiver {
     constructor({fetchState,onState,onError=()=>{}}){
       this.fetchState=fetchState;this.onState=onState;this.onError=onError;
@@ -31,6 +46,6 @@
       return this.resync;
     }
   }
-  if(typeof module!=='undefined'&&module.exports)module.exports={ShelfReceiver};
-  else root.ShelfReceiver=ShelfReceiver;
+  if(typeof module!=='undefined'&&module.exports)module.exports={ShelfReceiver,ShelfSearch};
+  else {root.ShelfReceiver=ShelfReceiver;root.ShelfSearch=ShelfSearch;}
 })(typeof window!=='undefined'?window:globalThis);

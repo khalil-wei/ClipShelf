@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('clips', {
   state: () => ipcRenderer.invoke('state'),
+  search: query => ipcRenderer.invoke('search', query),
+  text: id => ipcRenderer.invoke('text', id),
   mutate: (action, id, value) => ipcRenderer.invoke('mutate', action, id, value),
   use: (id, copyOnly, plain = false) => ipcRenderer.invoke('use', id, copyOnly, plain),
   stack: (action, ids) => ipcRenderer.invoke('stack', action, ids),

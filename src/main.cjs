@@ -14,6 +14,7 @@ const { ShelfUpdates } = require('./shelf-updates.cjs');
 const { imageDimensions, loadImageFile, commitImageImport } = require('./image-import.cjs');
 const { WindowsInput } = require('./windows-input.cjs');
 const { ShortcutLatch } = require('./shortcut-latch.cjs');
+const { projectItem, searchCooperatively } = require('./shelf-content.cjs');
 const windowsInput=process.platform==='win32'?new WindowsInput():null;
 const shortcutLatch=new ShortcutLatch(()=>windowsInput?.keyDown(0x56)||false);
 const shelfUpdates = new ShelfUpdates();
@@ -37,7 +38,7 @@ function stateTask(task) { const result = stateQueue.then(task); stateQueue = re
 let pauseTimer, pauseDeadline=0, modalBusy = false;
 const captureRetries = new Set();
 let status = { version: app.getVersion(), shortcut: '', native: false, events: false, dark: false, error: '', canUndo: false, startupSupported: startup.supported };
-const snapshot = () => ({ ...store.snapshot(), stack: stack.pending(store.items).map(x => ({ id: x.id, title: x.title || (x.kind === 'image' ? '图片' : x.text.slice(0, 60)), kind: x.kind })), items: store.items.map(({ html, ...item }) => ({ ...item, hasFormatting: !!html })), status: { ...status, canUndo: !!undoState, dark: nativeTheme.shouldUseDarkColors } });
+const snapshot = () => ({ ...store.snapshot(), stack: stack.pending(store.items).map(x => ({ id: x.id, title: x.title || (x.kind === 'image' ? '图片' : x.text.slice(0, 60)), kind: x.kind })), items: store.items.map(projectItem), status: { ...status, canUndo: !!undoState, dark: nativeTheme.shouldUseDarkColors } });
 function broadcast() {
   armPauseTimer();
   // A hidden shelf needs only the latest state when opened, never every copy.
@@ -95,7 +96,9 @@ function startNative() {
 function fitShelf(area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea, customHeight) {
   const desired = customHeight || (store.settings.compact ? 302 : store.settings.height);
   const height = Math.min(desired, area.height - 16), width = Math.max(280, area.width - 24);
-  win.setBounds({ x: area.x + 12, y: area.y + area.height - height - 8, width, height });
+  const bounds={ x: area.x + 12, y: area.y + area.height - height - 8, width, height };
+  const previous=win.getBounds();
+  if(Object.keys(bounds).some(key=>bounds[key]!==previous[key]))win.setBounds(bounds);
 }
 async function hideShelf(immediate = false) {
   if (!win?.isVisible()) return;
@@ -112,10 +115,11 @@ async function showShelf(captureTarget = true) {
   showing = true; target = '0';
   let area;
   try {
-    if (captureTarget && helper?.alive) {
+    if (captureTarget && (windowsInput || helper?.alive)) {
       target = windowsInput ? windowsInput.capture() : await helper.request('CAPTURE');
       if(target===win.getNativeWindowHandle().readBigUInt64LE().toString())target='0';
-      const [x, y, width, height] = (await helper.request('BOUNDS ' + target)).split(',').map(Number);
+      const bounds=windowsInput?windowsInput.bounds(target):null;
+      const [x, y, width, height] = windowsInput ? [bounds?.x,bounds?.y,bounds?.width,bounds?.height] : (await helper.request('BOUNDS ' + target)).split(',').map(Number);
       if ([x, y, width, height].every(Number.isFinite) && width > 0 && height > 0) {
         const rect = screen.screenToDipRect(null, { x, y, width, height }); area = screen.getDisplayMatching(rect).workArea;
       }
@@ -210,6 +214,16 @@ async function importImageFile(filePath) {
   });
 }
 function installIpc() {
+  let searchRequest=0;
+  ipcMain.handle('search', async (_, query) => {
+    const request=++searchRequest;
+    const ids=await searchCooperatively([...store.items],query,{isCurrent:()=>request===searchRequest});
+    return {ids,revision:shelfUpdates.revision,query};
+  });
+  ipcMain.handle('text', (_, id) => {
+    const item=store.items.find(item=>item.id===id);
+    return item?{ok:true,text:item.text}:{ok:false,error:'内容已删除'};
+  });
   ipcMain.handle('state', () => { try { store.settings.openAtLogin=startup.read(); } catch {} return shelfUpdates.full(snapshot(),store.items); });
   ipcMain.on('hide', () => { void hideShelf(); });
   ipcMain.on('resize-shelf', (_, height, finish) => {
@@ -360,9 +374,7 @@ function installIpc() {
   }
 }
 function createTray() {
-  const pixels = Buffer.alloc(16 * 16 * 4);
-  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const i = (y * 16 + x) * 4; const line = x > 3 && x < 12 && (y === 5 || y === 8 || y === 11); pixels[i] = line ? 255 : 211; pixels[i + 1] = line ? 255 : 91; pixels[i + 2] = line ? 255 : 113; pixels[i + 3] = 255; }
-  tray = new Tray(nativeImage.createFromBitmap(pixels, { width: 16, height: 16 })); tray.on('click', () => showShelf(false));
+  tray = new Tray(path.join(__dirname,'assets','clipshelf.ico')); tray.on('click', () => showShelf(false));
   tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 ClipShelf', click: () => showShelf(false) }, { label: '暂停 / 继续记录', click: () => { captureEpoch++; void stateTask(async()=>{try {store.mutate('pause');baseline();await save();broadcast();} catch(e){dialog.showErrorBox('保存失败',e.message);}}); } }, { type: 'separator' }, { label: '退出', click: () => app.quit() }]));
 }
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -376,7 +388,7 @@ else {
     background=new Background(); saver=new AsyncSave(dataFile,background,text=>{if(!safeStorage.isEncryptionAvailable()) throw Error('Windows 本地加密不可用，历史暂未保存');return safeStorage.encryptString(text);});
     media = new MediaStore(path.join(app.getPath('userData'), 'media'), { encode: buffer => safeStorage.encryptString(buffer.toString('base64')), decode: buffer => Buffer.from(safeStorage.decryptString(buffer), 'base64') });
     await collectMedia(); installIpc();
-    win = new BrowserWindow({ width: 1400, height: 390, frame: false, show: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, backgroundColor: '#edf0f4', backgroundMaterial: 'acrylic', roundedCorners: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
+    win = new BrowserWindow({ icon: path.join(__dirname,'assets','clipshelf-256.png'), width: 1400, height: 390, frame: false, show: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, backgroundColor: '#edf0f4', roundedCorners: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false, spellcheck: false } });
     win.on('show',()=>{broadcast();win.webContents.send('shelf-visible');});
     win.on('hide',()=>win.webContents.send('shelf-suspend'));
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', e => e.preventDefault());

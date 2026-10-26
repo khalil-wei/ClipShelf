@@ -17,6 +17,11 @@ class Background {
     if(this.closed||this.failure)return Promise.reject(this.failure||Error('后台处理已关闭'));
     if(!this.worker)this.start();clearTimeout(this.idleTimer);
     if(operation==='png'&&value?.pixels?.byteLength>=8*1024*1024)this.largeImage=true;
+    // A large JSON snapshot can leave a worker heap as large as an image job.
+    if(operation==='serialize'&&Array.isArray(value?.items)){
+      let chars=0;
+      for(const item of value.items){chars+=(item.text?.length||0)+(item.html?.length||0);if(chars>=4*1024*1024){this.largeImage=true;break;}}
+    }
     return new Promise((resolve,reject)=>{
       const id=++this.nextId;this.pending.set(id,{resolve,reject});this.worker.ref();
       try {const pixels=value?.pixels,buffer=pixels?.buffer;const transfer=buffer instanceof ArrayBuffer&&pixels.byteOffset===0&&pixels.byteLength===buffer.byteLength&&!isMarkedAsUntransferable(buffer)?[buffer]:[];this.worker.postMessage({id,operation,value},transfer);}
