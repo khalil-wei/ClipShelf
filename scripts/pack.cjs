@@ -17,6 +17,12 @@ async function pack(){
   for(const folder of packages){
     const icons=verifyExeIcons(path.join(folder,'ClipShelf.exe'),path.join(root,'src','assets','clipshelf.ico'));
     console.log('EXE icon resources verified: '+icons.map(icon=>icon.size+'px '+icon.encoding).join(', '));
+    if(process.platform==='win32'){
+      const shell=require('koffi').load('shell32.dll');
+      const notify=shell.func('void __stdcall SHChangeNotify(int32_t eventId, uint32_t flags, str16 path, uintptr_t unused)');
+      // SHCNE_UPDATEITEM | SHCNF_PATHW | SHCNF_FLUSH: update this file's Shell view.
+      notify(0x2000,0x1005,path.join(folder,'ClipShelf.exe'),0);
+    }
     const locales=path.join(folder,'locales');
     // Keep English fallback and both Chinese locales; preserve runtime DLLs and licenses.
     for(const name of await fs.readdir(locales)){
