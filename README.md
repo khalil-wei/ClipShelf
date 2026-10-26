@@ -1,4 +1,4 @@
-# ClipShelf 0.5.8 for Windows
+# ClipShelf 0.5.9 for Windows
 
 参考 Paste 的本地剪贴板工作流，使用独立代码实现 Windows 桌面应用。
 
@@ -13,6 +13,12 @@ ClipShelf 是一款本地优先的 Windows 剪贴板历史工具，采用 Electr
 ## 启动新版
 
 Windows 便携版会发布在 GitHub Releases。保留同目录的所有文件；升级前先从旧版托盘菜单退出。新版继续使用 `%APPDATA%/ClipShelf/history.enc`，兼容上一版文本历史。
+
+## 0.5.9 Windows 文件图标兼容修复
+
+- ICO 的 16–128 像素小尺寸改用标准 32 位 DIB 位图与透明掩码，256 像素保留 PNG，使用同一蓝白 Logo。
+- 打包后核对 EXE 图标组引用的每个资源、尺寸与编码；不再只检查 PNG 资源是否存在。
+- 版本升至 0.5.9，使用独立成品目录，避免验证时沿用旧目录的 Shell 图标缓存。文件资源管理器显示验证见 [验证记录](docs/validation-v0.5.9.md)。
 
 ## 0.5.8 本地精简与唤起优化
 

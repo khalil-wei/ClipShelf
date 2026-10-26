@@ -2,6 +2,7 @@ const fs=require('node:fs/promises');
 const path=require('node:path');
 const {execFileSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..');
+const {verifyExeIcons}=require('./verify-exe-icons.cjs');
 async function pack(){
   const {version}=require('../package.json');
   execFileSync(process.execPath,[path.join(__dirname,'build-native.cjs')],{cwd:root,stdio:'inherit',windowsHide:true});
@@ -14,6 +15,8 @@ async function pack(){
     ignore:[/^\/(build|scripts|dist|design|reference|test|docs|artifacts|test-artifacts|\.smoke-data|\.git|\.codex|\.agents)(\/|$)/,/^\/\.env(\.|$)/,/paste-reference-evidence\.json$/]
   });
   for(const folder of packages){
+    const icons=verifyExeIcons(path.join(folder,'ClipShelf.exe'),path.join(root,'src','assets','clipshelf.ico'));
+    console.log('EXE icon resources verified: '+icons.map(icon=>icon.size+'px '+icon.encoding).join(', '));
     const locales=path.join(folder,'locales');
     // Keep English fallback and both Chinese locales; preserve runtime DLLs and licenses.
     for(const name of await fs.readdir(locales)){
