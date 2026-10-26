@@ -1,11 +1,11 @@
 {
   "name": "clipshelf",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "private": true,
   "description": "Local-first Windows clipboard shelf",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wdlami/ClipShelf.git"
+    "url": "https://github.com/khalil-wei/ClipShelf.git"
   },
   "main": "src/main.cjs",
   "scripts": {
