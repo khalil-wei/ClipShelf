@@ -1,6 +1,6 @@
 # ClipShelf for Windows
 
-[中文](#两种版本) | [English](#english)
+中文 | [English](README.en.md)
 
 参考 Paste 的本地剪贴板工作流，使用独立代码实现 Windows 桌面应用。
 
@@ -38,45 +38,6 @@ Rust 0.5.9 已通过单元测试与隔离 WebView2 界面冒烟测试；真实�
 Electron 版本在仓库根目录执行 `npm install`、`npm start`；测试使用 `npm test`。
 
 Rust 版本需要 Windows x64、Rust GNU 工具链、Node.js、MinGW-w64 和 WebView2。在 `rust/` 目录执行 `npm ci`、`npm run dev`；测试使用 `npm test`，安装包使用 `npm run build -- --ci`。如果 MinGW 不在项目同级 `tools/mingw64/bin`，请将 `CLIPSHELF_MINGW_BIN` 指向实际的 `mingw64/bin`。开发脚本默认使用隔离数据目录，避免读取正式历史。
-
-## English
-
-ClipShelf is a local-first clipboard history app for Windows. The repository contains two implementations with the same clipboard workflow. History and images stay on the local machine and are protected using the Windows account.
-
-### Two versions
-
-| | Electron 0.5.8 | Rust/Tauri 0.5.9 |
-| --- | --- | --- |
-| Source | Repository root | [`rust/`](rust/) |
-| Desktop stack | Electron with a native Windows helper | Rust, Tauri 2 and the system WebView2 runtime |
-| Data directory | `%APPDATA%\ClipShelf` | `%APPDATA%\ClipShelf-rs` |
-| Distribution | Portable Windows package | Windows x64 installer ZIP; extract it before running setup |
-| Best suited for | Continuing with the existing Electron version | Trying the Rust backend and smaller installer |
-
-Both versions provide clipboard and image history, search, favorites, groups, undo and sequential paste. The Rust implementation follows the 0.5.8 behavior; system integrations still need to be verified separately for each version.
-
-### Why use the Rust version?
-
-- **Smaller installer:** the 0.5.9 Windows x64 installer ZIP is about 1.8 MiB. It uses the system WebView2 runtime, which is not included in that size and must be installed if missing.
-- **Direct Windows integration:** the Rust backend calls Windows APIs for clipboard events, source identification, focus handling, shortcuts and input, reducing reliance on a separate native helper process and its communication protocol.
-- **Familiar UI and local protection:** the existing interface is retained, while Windows DPAPI protects Rust history and images on the local machine.
-- **Migration with a fallback:** Rust uses a separate data directory and can import the Electron history and images read-only on first launch, leaving the old files in place. Migration requires the same Windows account and the old `Local State`, `history.enc` and associated media files. Existing Rust history is not automatically merged.
-
-Installer size does not establish memory use or startup speed. WebView2 also runs its own processes, and the two versions have not yet been benchmarked under the same workload.
-
-### Download and run
-
-Choose a version from [GitHub Releases](https://github.com/khalil-wei/ClipShelf/releases). For Rust 0.5.9, extract the installer ZIP to a normal user directory and run setup. Exit the older version from its tray menu first to avoid global shortcut conflicts.
-
-Rust 0.5.9 passed unit tests and an isolated WebView2 UI smoke test. Real desktop cross-app paste, login startup, installation and uninstallation have not all completed acceptance testing. The installer is unsigned.
-
-### Run from source
-
-For Electron, run `npm install` and `npm start` in the repository root; run `npm test` for tests.
-
-For Rust, Windows x64, a Rust GNU toolchain, Node.js, MinGW-w64 and WebView2 are required. In `rust/`, run `npm ci` and `npm run dev`; use `npm test` for tests and `npm run build -- --ci` for the installer. If MinGW is not in the sibling `tools/mingw64/bin` directory, set `CLIPSHELF_MINGW_BIN` to the actual `mingw64/bin`. The development script uses an isolated data directory by default.
-
-The historical release notes below are in Chinese.
 
 ## 开源维护
 
