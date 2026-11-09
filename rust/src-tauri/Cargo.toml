@@ -1,0 +1,38 @@
+[package]
+name = "clipshelf"
+version = "0.5.9"
+description = "Local-first Windows clipboard shelf (Rust/Tauri rewrite of ClipShelf)"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+
+[lib]
+name = "clipshelf_lib"
+# 桌面端只需 rlib；cdylib/staticlib 是移动端模板遗留，
+# 在 MinGW(ld) 下会因导出符号过多报 "export ordinal too large"。
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+embed-resource = "3"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+regex = "1"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.23"
+sha2 = "0.10"
+aes-gcm = "0.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

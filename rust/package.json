@@ -1,0 +1,16 @@
+{
+  "name": "clipshelf-rs",
+  "version": "0.5.9",
+  "private": true,
+  "description": "ClipShelf 0.5.9 Rust/Tauri workspace",
+  "scripts": {
+    "dev": "node scripts/run-tauri.mjs dev",
+    "build": "node scripts/run-tauri.mjs build",
+    "tauri": "node scripts/run-tauri.mjs",
+    "check": "node scripts/run-tauri.mjs --cargo check",
+    "test": "node scripts/run-tauri.mjs --cargo test"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
