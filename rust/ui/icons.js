@@ -20,7 +20,7 @@ const iconPaths = {
   check: 'm5 12 4 4L19 6', chevron: 'm9 5 7 7-7 7',
   grid: 'M4 4h6v6H4Z M14 4h6v6h-6Z M4 14h6v6H4Z M14 14h6v6h-6Z',
   expand: 'M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5',
-  more: 'M5 12h.01 M12 12h.01 M19 12h.01',
+  more: 'M5 12h1 M11.5 12h1 M18 12h1',
   moon: 'M20 15a8 8 0 0 1-11-11 9 9 0 1 0 11 11',
   keyboard: 'M3 6h18v12H3Z M6 10h1 M10 10h1 M14 10h1 M18 10h.01 M7 14h10',
   shield: 'm12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z M8 12l3 3 5-6',
@@ -29,6 +29,6 @@ const iconPaths = {
 };
 window.clipIcon = function (name, size = 18) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  for (const [key, value] of Object.entries({ viewBox: '0 0 24 24', width: size, height: size, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(key, String(value));
+  for (const [key, value] of Object.entries({ viewBox: '0 0 24 24', width: size, height: size, fill: 'none', stroke: 'currentColor', 'stroke-width': name === 'more' ? 3.4 : 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(key, String(value));
   const path = document.createElementNS(svg.namespaceURI, 'path'); path.setAttribute('d', iconPaths[name] || iconPaths.text); svg.append(path); return svg;
 };

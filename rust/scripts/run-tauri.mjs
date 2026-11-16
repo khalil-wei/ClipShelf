@@ -5,7 +5,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -49,11 +49,12 @@ child.on('error', error => {
 child.on('exit', code => {
   if (code === 0 && !cargoMode && args[0] === 'build') {
     const bundle = join(root, 'src-tauri', 'target', 'x86_64-pc-windows-gnu', 'release', 'bundle', 'nsis');
-    const installers = readdirSync(bundle).filter(name => name.endsWith('-setup.exe'));
-    if (installers.length !== 1) { console.error('Expected exactly one NSIS installer'); process.exit(1); }
+    const { productName, version } = JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
+    const installer = `${productName}_${version}_x64-setup.exe`;
+    if (!existsSync(join(bundle, installer))) { console.error(`NSIS installer not found: ${installer}`); process.exit(1); }
     // ZIP stores bytes rather than the build directory's Windows integrity label.
-    const archive = join(bundle, installers[0].replace(/\.exe$/, '.zip'));
-    const packaged = spawnSync('tar.exe', ['-a', '-c', '-f', archive, '-C', bundle, installers[0]], { stdio: 'inherit', windowsHide: true });
+    const archive = join(bundle, installer.replace(/\.exe$/, '.zip'));
+    const packaged = spawnSync('tar.exe', ['-a', '-c', '-f', archive, '-C', bundle, installer], { stdio: 'inherit', windowsHide: true });
     if (packaged.status === 0) console.log(`Installer distribution: ${archive}`);
     process.exit(packaged.status ?? 1);
   }

@@ -103,16 +103,15 @@ fn fit(app: &tauri::AppHandle, target: isize, height: Option<f64>) {
     });
     drop(runtime);
     let (x, y, width, height, scale) = win32::work_area(target);
+    let side_inset = (8.0 * scale).round() as i32;
+    let bottom_inset = (4.0 * scale).round() as i32;
     let panel_height = (desired * scale)
         .round()
-        .min(f64::from(height) - 16.0 * scale)
+        .min(f64::from(height - side_inset - bottom_inset))
         .max(1.0) as u32;
-    let panel_width = (f64::from(width) - 24.0 * scale).max(280.0) as u32;
-    let position = tauri::PhysicalPosition::new(
-        x + (12.0 * scale) as i32,
-        y + height - panel_height as i32 - (8.0 * scale) as i32,
-    );
-    let size = tauri::PhysicalSize::new(panel_width, panel_height);
+    let position =
+        tauri::PhysicalPosition::new(x + side_inset, y + height - panel_height as i32 - bottom_inset);
+    let size = tauri::PhysicalSize::new((width - 2 * side_inset) as u32, panel_height);
     if window.inner_size().ok() != Some(size) {
         let _ = window.set_size(size);
     }
@@ -888,10 +887,11 @@ pub fn run() {
                     .inner_size(1400.0, 390.0)
                     .resizable(false)
                     .decorations(false)
+                    .shadow(false)
+                    .transparent(true)
                     .always_on_top(true)
                     .skip_taskbar(true)
                     .data_directory(directory.join("webview2"))
-                    .background_color(tauri::window::Color(237, 240, 244, 255))
                     .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                     .on_navigation(|url| {
                         url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")

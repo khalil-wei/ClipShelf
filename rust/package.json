@@ -1,8 +1,8 @@
 {
   "name": "clipshelf-rs",
-  "version": "0.5.9",
+  "version": "0.6.0",
   "private": true,
-  "description": "ClipShelf 0.5.9 Rust/Tauri workspace",
+  "description": "ClipShelf 0.6.0 Rust/Tauri workspace",
   "scripts": {
     "dev": "node scripts/run-tauri.mjs dev",
     "build": "node scripts/run-tauri.mjs build",

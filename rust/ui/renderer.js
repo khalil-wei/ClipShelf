@@ -29,7 +29,7 @@ function animateShelf(open) {
   const shell = $('#shell');
   if (reduced()) { shell.style.opacity = open ? '1' : '0'; return; }
   shell.style.opacity = '1';
-  animation = shell.animate(open ? [{ opacity: 0, transform: 'translateY(28px) scale(.994)' }, { opacity: 1, transform: 'translateY(0) scale(1)' }] : [{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0, transform: 'translateY(24px)' }], { duration: open ? 235 : 125, easing: open ? 'cubic-bezier(.16,1,.3,1)' : 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+  animation = shell.animate(open ? [{ opacity: 0, transform: 'translateY(28px)' }, { opacity: 1, transform: 'translateY(0)' }] : [{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0, transform: 'translateY(24px)' }], { duration: open ? 235 : 125, easing: open ? 'cubic-bezier(.16,1,.3,1)' : 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
 }
 function refreshTabs() {
   const key = JSON.stringify([tab, state.groups]); if (key === tabsKey) return; tabsKey = key;
@@ -97,7 +97,15 @@ function renderWindow() {
     let card = cards.get(item.id);
     if (!card || card.dataset.fingerprint !== fingerprint) {
       const old = card; card = createCard(item); card.dataset.fingerprint = fingerprint; cards.set(item.id, card);
-      if (old) old.replaceWith(card); else { track.append(card); if (!reduced() && performance.now()-lastScroll>160 && index >= start && index < end) card.firstElementChild.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' }); }
+      if (old) {
+        const starFocused = old.querySelector('[aria-pressed]:focus-visible');
+        old.replaceWith(card);
+        if (starFocused) {
+          card.tabIndex = -1;
+          card.focus({ preventScroll: true });
+          card.querySelector('[aria-pressed]').focus({ preventScroll: true });
+        }
+      } else { track.append(card); if (!reduced() && performance.now()-lastScroll>160 && index >= start && index < end) card.firstElementChild.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' }); }
     }
     card.style.transform = `translate3d(${index * stride}px,0,0)`;
     card.classList.toggle('selected', item.id === primary); card.classList.toggle('multi-selected', selection.has(item.id) && item.id !== primary);
@@ -108,10 +116,10 @@ function renderWindow() {
   if (primary && cards.has(primary)) viewport.setAttribute('aria-activedescendant', 'clip-' + primary); else viewport.removeAttribute('aria-activedescendant');
 }
 function createCard(item) {
-  const card = node('article', 'card ' + item.kind); card.id = 'clip-' + item.id; card.dataset.id = item.id; card.setAttribute('role', 'option'); card.setAttribute('aria-label', titleFor(item)); card.draggable = true;
+  const card = node('article', 'card ' + item.kind); card.id = 'clip-' + item.id; card.dataset.id = item.id; card.setAttribute('role', 'option'); card.setAttribute('aria-label', titleFor(item) + (item.starred ? '，已收藏' : '')); card.draggable = true;
   const surface = node('div', 'card-surface'), head = node('div', 'card-head');
   head.append(node('span', '', typeLabels[item.kind]), node('time', '', relativeTime(item.updated)));
-  if (item.starred) { const pin = node('span', 'pin-mark'); pin.append(icon('star', 11)); head.append(pin); }
+  if (item.starred) { const pin = node('span', 'pin-mark'); pin.title = '已收藏'; pin.append(icon('star', 12)); head.append(pin); }
   const source = node('span', 'source-badge', sourceName(item.source).slice(0, 1).toUpperCase()); source.title = sourceName(item.source); head.append(source);
   const content = node('div', 'card-content');
   if (item.kind === 'image') {
@@ -136,7 +144,10 @@ function createCard(item) {
   if (item.hasFormatting) { const formatted = node('span', 'format-badge', 'Aa'); formatted.title = '保留原始格式 · Shift+Enter 以纯文本粘贴'; foot.append(formatted); }
   const actions = node('span', 'card-actions');
   for (const [name, title, action] of [['copy', '复制', () => use([item.id], true)], ['star', item.starred ? '取消收藏' : '收藏', () => mutate('star', item.id)], ['more', '更多操作', event => contextMenu(event, item.id)]]) {
-    const b = node('button'); b.title = title; b.setAttribute('aria-label', title); b.append(icon(name, 13)); b.onclick = event => { event.stopPropagation(); action(event); }; b.ondblclick = event => event.stopPropagation(); actions.append(b);
+    const b = node('button'); b.title = title; b.setAttribute('aria-label', name === 'star' ? '收藏' : title);
+    if (name === 'star') b.setAttribute('aria-pressed', String(item.starred));
+    if (name === 'more') b.setAttribute('aria-haspopup', 'menu');
+    b.append(icon(name, 14)); b.onclick = event => { event.stopPropagation(); action(event); }; b.ondblclick = event => event.stopPropagation(); actions.append(b);
   }
   foot.append(actions, node('span', 'quick-number')); surface.append(head, content, foot); card.append(surface);
   card.onclick = event => selectItem(item.id, event.ctrlKey || event.metaKey, event.shiftKey);
@@ -335,7 +346,7 @@ document.addEventListener('keydown', event => {
     event.preventDefault(); go(key === 'arrowright' || key === 'arrowdown' ? 1 : -1, event.shiftKey, key === 'home' ? 'first' : key === 'end' ? 'last' : null); return;
   }
   if (editing) return;
-  if (key === ' ') { event.preventDefault(); openPreview(); return; }
+  if (key === ' ') { if (!event.target.closest('.card-actions button')) { event.preventDefault(); openPreview(); } return; }
   if (key === 'delete' && selection.size) { event.preventDefault(); mutate('delete', [...selection]); return; }
   if (!ctrl && !event.altKey && event.key.length === 1) { $('#search').focus(); $('#search').value += event.key; resetScroll(); render(); event.preventDefault(); }
 });
