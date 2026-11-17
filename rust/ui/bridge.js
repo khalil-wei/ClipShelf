@@ -50,6 +50,8 @@
     rotateImage: (id, rotation) => request('image-rotate', { id, rotation }),
     exportImage: id => request('image-export', { id }),
     importImage: () => request('image-import'),
+    checkUpdate: () => request('update-check'),
+    installUpdate: version => request('update-install', { version }),
     hide: () => notify('hide'),
     resize: (height, finish = false) => notify('resize', { height, finish }),
     onState: on('state-changed'),

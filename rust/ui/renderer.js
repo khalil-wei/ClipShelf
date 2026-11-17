@@ -284,7 +284,35 @@ $('#import-image').onclick = async () => {
   finally { button.disabled = false; }
 };
 for(const action of ['next','copy','reverse','clear']) $('#stack-'+action).onclick = () => stackAction(action);
-$('#hide').onclick = () => window.clips.hide(); $('#about').onclick = () => notice('ClipShelf ' + (state.status.version || '') + ' · 本地剪贴板 · ' + (state.status.events ? 'Windows 事件采集' : '轮询采集'));
+$('#hide').onclick = () => window.clips.hide();
+$('#about').onclick = $('#about-settings').onclick = () => {
+  $('#about-version').textContent = `ClipShelf ${state.status.version || ''} · 本地剪贴板 · ${state.status.events ? 'Windows 事件采集' : '轮询采集'}`;
+  $('#about-dialog').showModal();
+};
+let updateVersion;
+$('#update-action').onclick = async event => {
+  const button = event.currentTarget;
+  const status = $('#update-status');
+  button.disabled = true;
+  try {
+    if (updateVersion) {
+      status.textContent = '正在下载并验证更新，完成后将退出并安装…';
+      await window.clips.installUpdate(updateVersion);
+    } else {
+      status.textContent = '正在检查更新…';
+      ({ version: updateVersion } = await window.clips.checkUpdate());
+      status.textContent = updateVersion ? `发现 ${updateVersion}。安装时 ClipShelf 将退出，完成后自动打开。` : '当前已是最新版本。';
+    }
+  } catch (error) {
+    status.textContent = typeof error === 'string' ? error : '更新失败，请稍后重试。';
+    updateVersion = undefined;
+  } finally {
+    button.textContent = updateVersion ? '安装更新' : '检查更新';
+    button.disabled = false;
+    const dialog = $('#about-dialog');
+    if (dialog.open && !dialog.contains(document.activeElement)) button.focus();
+  }
+};
 $('#pause-duration').onclick = event => { const host=$('#context-menu'); host.replaceChildren(); for(const [minutes,label] of [[5,'暂停 5 分钟'],[15,'暂停 15 分钟'],[60,'暂停 1 小时'],[0,'暂停，直到手动恢复']]) { const button=node('button','',label); button.setAttribute('role','menuitem'); button.onclick=()=>{closeMenus();mutate('pause',null,minutes);}; host.append(button); } const rect=event.currentTarget.getBoundingClientRect(); host.hidden=false;host.style.left=Math.max(8,rect.right-host.offsetWidth)+'px';host.style.top=Math.min(rect.bottom+4,innerHeight-host.offsetHeight-8)+'px'; };
 $('#pause').onclick = () => mutate('pause'); $('#undo').onclick = () => mutate('undo');
 $('#add-group').onclick = () => openGroup(); $('#edit-group').onclick = () => openGroup(tab); $('#new-item').onclick = () => openPreview('new'); $('#settings').onclick = openSettings;

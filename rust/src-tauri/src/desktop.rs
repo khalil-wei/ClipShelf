@@ -16,6 +16,7 @@ use std::{
 };
 use tauri::{Emitter, Manager, RunEvent, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 pub struct AppState {
     pub runtime: Mutex<Runtime>,
@@ -26,6 +27,8 @@ pub struct AppState {
     hiding: AtomicBool,
     quitting: AtomicBool,
     flushed: AtomicBool,
+    updating: AtomicBool,
+    available_update: Mutex<Option<Update>>,
     target: AtomicIsize,
     visibility: AtomicU64,
     latch: AtomicBool,
@@ -45,6 +48,8 @@ impl AppState {
             hiding: AtomicBool::new(false),
             quitting: AtomicBool::new(false),
             flushed: AtomicBool::new(false),
+            updating: AtomicBool::new(false),
+            available_update: Mutex::new(None),
             target: AtomicIsize::new(0),
             visibility: AtomicU64::new(0),
             latch: AtomicBool::new(false),
@@ -61,8 +66,119 @@ impl Drop for Flag<'_> {
         self.0.store(false, Ordering::SeqCst);
     }
 }
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[test]
+    fn update_launch_requires_history_to_be_saved_and_failure_allows_retry() {
+        let directory =
+            std::env::temp_dir().join(format!("clipshelf-update-{}", uuid::Uuid::new_v4()));
+        let runtime = Runtime::load(directory.clone(), None).unwrap();
+        let s = AppState::new(runtime, true);
+        {
+            let mut runtime = s.runtime.lock().unwrap();
+            runtime
+                .store
+                .add("synthetic update history", "fixture.exe", "", now());
+            runtime.dirty = true;
+            runtime.directory = directory.join("missing");
+        }
+        assert!(
+            install_update(&s, || panic!("must not start installer when saving fails")).is_err()
+        );
+        s.runtime.lock().unwrap().directory = directory.clone();
+        let result = install_update(&s, || {
+            let saved = Runtime::load(directory.clone(), None).unwrap();
+            assert_eq!(
+                saved.store.items[0].text.as_ref(),
+                "synthetic update history"
+            );
+            Err("synthetic installer failure".into())
+        });
+        assert_eq!(result.unwrap_err(), "synthetic installer failure");
+        assert!(install_update(&s, || Ok(())).is_ok());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
 fn state(app: &tauri::AppHandle) -> Arc<AppState> {
     app.state::<Arc<AppState>>().inner().clone()
+}
+fn install_update(
+    s: &AppState,
+    install: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let ticket = s.operations.issue().ok_or("应用正在退出")?;
+    let _turn = s.operations.wait(ticket);
+    if s.quitting.load(Ordering::SeqCst) {
+        return Err("应用正在退出".into());
+    }
+    if s.busy.swap(true, Ordering::SeqCst) {
+        return Err("正在粘贴，请完成后再更新。".into());
+    }
+    let _busy = Flag(&s.busy);
+    // Windows 安装器会直接退出进程。先保存已完成的操作，并持锁到安装器启动，阻止采集插入新历史。
+    let mut runtime = s.runtime.lock().unwrap();
+    runtime
+        .save()
+        .map_err(|_| "历史保存失败，已停止更新。请确认磁盘可写后重试。")?;
+    install()
+}
+async fn update(
+    app: &tauri::AppHandle,
+    s: &Arc<AppState>,
+    install: bool,
+    args: Option<Value>,
+) -> Result<Value, String> {
+    if !app.config().plugins.0.contains_key("updater") {
+        return Err("此安装包未启用一键更新。".into());
+    }
+    if s.updating.swap(true, Ordering::SeqCst) {
+        return Err("正在处理更新，请稍候。".into());
+    }
+    let _updating = Flag(&s.updating);
+    if !install {
+        let updater = app
+            .updater_builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|_| "无法初始化更新检查。")?;
+        let available = updater
+            .check()
+            .await
+            .map_err(|_| "无法检查更新，请确认网络可访问 GitHub 后重试。")?;
+        let result = json!({"version": available.as_ref().map(|update| &update.version)});
+        *s.available_update.lock().unwrap() = available;
+        return Ok(result);
+    }
+    let version = args
+        .as_ref()
+        .and_then(|args| args.get("version"))
+        .and_then(Value::as_str);
+    let mut update = s
+        .available_update
+        .lock()
+        .unwrap()
+        .take()
+        .filter(|update| Some(update.version.as_str()) == version)
+        .ok_or("请先重新检查更新。")?;
+    // Tauri 的检查超时不会传给安装包下载。
+    update.timeout = Some(Duration::from_secs(60));
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|_| "下载失败或更新签名验证未通过，请重新检查更新。")?;
+    let s = Arc::clone(s);
+    tauri::async_runtime::spawn_blocking(move || {
+        install_update(&s, || {
+            update
+                .install(bytes)
+                .map_err(|_| "无法启动更新安装程序，请重试。".into())
+        })
+    })
+    .await
+    .map_err(|_| "安装任务失败，请重试。")??;
+    Ok(json!({"ok":true}))
 }
 fn shelf(app: &tauri::AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window("shelf")
@@ -554,6 +670,9 @@ async fn clips(
     if shared.quitting.load(Ordering::SeqCst) {
         return Err("应用正在退出".into());
     }
+    if ["update-check", "update-install"].contains(&command.as_str()) {
+        return update(&app, &shared, command == "update-install", args).await;
+    }
     // 在接收请求时占位，重复点击必须立即拒绝，不能在线程池排队后再次粘贴。
     let modal = ["image-import", "image-export"].contains(&command.as_str());
     let queue = command == "stack"
@@ -856,6 +975,10 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
+            if app.config().plugins.0.contains_key("updater") {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             let directory = if smoke && std::env::var_os("CLIPSHELF_DATA_DIR").is_none() {
                 std::env::temp_dir().join(format!("clipshelf-smoke-{}", std::process::id()))
             } else {
