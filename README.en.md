@@ -1,40 +1,41 @@
-# ClipShelf for Windows
+# ClipShelf
 
-[中文](README.md) | English
+[简体中文](README.md) · English
 
-ClipShelf is a local-first clipboard history app for Windows. The repository contains two implementations with the same clipboard workflow. History and images stay on the local machine and are protected using the Windows account.
+ClipShelf is a Paste-inspired clipboard manager for Windows. A keyboard shortcut brings back the text and images you copied earlier. Your history is encrypted on your device, with no cloud sync.
 
-## Two versions
+**[Download for Windows x64](https://github.com/khalil-wei/ClipShelf/releases/latest)**
 
-| | Electron 0.5.8 | Rust/Tauri 0.5.9 |
-| --- | --- | --- |
-| Source | Repository root | [`rust/`](rust/) |
-| Desktop stack | Electron with a native Windows helper | Rust, Tauri 2 and the system WebView2 runtime |
-| Data directory | `%APPDATA%\ClipShelf` | `%APPDATA%\ClipShelf-rs` |
-| Distribution | Portable Windows package | Windows x64 installer ZIP; extract it before running setup |
-| Best suited for | Continuing with the existing Electron version | Trying the Rust backend and smaller installer |
+![ClipShelf history panel with search, groups, and clipboard cards](docs/images/clipshelf-history.png)
 
-Both versions provide clipboard and image history, search, favorites, groups, undo and sequential paste. The Rust implementation follows the 0.5.8 behavior; system integrations still need to be verified separately for each version.
+## Features
 
-## Why use the Rust version?
+- **Search and filter history:** Keep copied text and images, then filter by type, time, or source. Code, links, and colors get their own card previews.
+- **Preview and edit:** Inspect long text or images before pasting. Edit text and rename items.
+- **Favorites and groups:** Keep frequently used items easy to find and group them by purpose.
+- **Keyboard shortcuts and paste queues:** Paste back into the original app, or queue several items and paste them one at a time.
+- **In-app updates:** The Rust/Tauri version can check for, verify, and install updates.
 
-- **Smaller installer:** the 0.5.9 Windows x64 installer ZIP is about 1.8 MiB. It uses the system WebView2 runtime, which is not included in that size and must be installed if missing.
-- **Direct Windows integration:** the Rust backend calls Windows APIs for clipboard events, source identification, focus handling, shortcuts and input, reducing reliance on a separate native helper process and its communication protocol.
-- **Familiar UI and local protection:** the existing interface is retained, while Windows DPAPI protects Rust history and images on the local machine.
-- **Migration with a fallback:** Rust uses a separate data directory and can import the Electron history and images read-only on first launch, leaving the old files in place. Migration requires the same Windows account and the old `Local State`, `history.enc` and associated media files. Existing Rust history is not automatically merged.
+## Quick start
 
-Installer size does not establish memory use or startup speed. WebView2 also runs its own processes, and the two versions have not yet been benchmarked under the same workload.
+1. Download the Windows x64 installer ZIP from [Releases](https://github.com/khalil-wei/ClipShelf/releases/latest), extract it, and run setup. WebView2 is required.
+2. Press `Ctrl+Shift+V` from the app you want to paste into and type to search your history.
+3. Select an item and press `Space` to preview it, or press `Enter` or double-click to paste it.
 
-## Download and run
+If you are upgrading from 0.5.9 or earlier, quit ClipShelf from the system tray and install 0.6.0 or later manually once. After that, use **Preferences → About and Updates**.
 
-Choose a version from [GitHub Releases](https://github.com/khalil-wei/ClipShelf/releases). For Rust 0.5.9, extract the installer ZIP to a normal user directory and run setup. Exit the older version from its tray menu first to avoid global shortcut conflicts.
-
-Rust 0.5.9 passed unit tests and an isolated WebView2 UI smoke test. Real desktop cross-app paste, login startup, installation and uninstallation have not all completed acceptance testing. The installer is unsigned.
+![ClipShelf quick preview showing an item's full text before pasting](docs/images/clipshelf-preview.png)
 
 ## Run from source
 
-For Electron, run `npm install` and `npm start` in the repository root; run `npm test` for tests.
+The current Windows version uses Rust and Tauri and lives in `rust/`. Development requires Node.js, the Rust GNU toolchain, MinGW-w64, and WebView2.
 
-For Rust, Windows x64, a Rust GNU toolchain, Node.js, MinGW-w64 and WebView2 are required. In `rust/`, run `npm ci` and `npm run dev`; use `npm test` for tests and `npm run build -- --ci` for the installer. If MinGW is not in the sibling `tools/mingw64/bin` directory, set `CLIPSHELF_MINGW_BIN` to the actual `mingw64/bin`. The development script uses an isolated data directory by default.
+```powershell
+cd rust
+npm ci
+npm run dev
+```
 
-For historical release notes, see the [Chinese README](README.md).
+If MinGW-w64 is not in the sibling `tools/mingw64/bin` directory, set `CLIPSHELF_MINGW_BIN` to its `bin` path. Run `npm test` from `rust/` to run the tests.
+
+Report bugs on [GitHub Issues](https://github.com/khalil-wei/ClipShelf/issues) or see the [contribution guide](CONTRIBUTING.md). ClipShelf is available under the [MIT license](LICENSE).
